@@ -159,7 +159,7 @@ body {
   height: 20px;
   border-radius: 3px;
   padding: 0 7px;
-  font-size: var(--fs-event, 13px);
+  font-size: var(--fs-event, 16px);
   font-weight: 700;
   display: flex;
   align-items: center;
@@ -909,7 +909,7 @@ select.form-input { cursor: pointer; }
       </div>
       <div class="form-group">
         <label class="form-label">이벤트 바 글자 크기</label>
-        <input type="range" id="s-font-size" min="9" max="20" step="1" value="13" oninput="previewFontSize(this.value)">
+        <input type="range" id="s-font-size" min="9" max="20" step="1" value="16" oninput="previewFontSize(this.value)">
         <div style="text-align:right; font-size:12px; color:#aaa; margin-top:4px"><span id="font-size-label">13</span>px</div>
       </div>
       <div class="form-group">
@@ -1866,8 +1866,8 @@ function openSettings(tab) {
   document.getElementById('cal-height-label').textContent = state.calendarHeight || 1080;
   document.getElementById('s-max-event-rows').value = state.maxEventRows || 3;
   document.getElementById('max-event-rows-label').textContent = state.maxEventRows || 3;
-  document.getElementById('s-font-size').value = state.fontSize || 13;
-  document.getElementById('font-size-label').textContent = state.fontSize || 13;
+  document.getElementById('s-font-size').value = state.fontSize || 16;
+  document.getElementById('font-size-label').textContent = state.fontSize || 16;
   document.getElementById('s-border-width').value = state.borderWidth || 2;
   document.getElementById('border-width-label').textContent = state.borderWidth || 2;
 
@@ -1915,7 +1915,7 @@ function saveCalSettings() {
 }
 function applyCalendarStyles() {
   const h = state.calendarHeight || 1080;
-  const fs = state.fontSize || 13;
+  const fs = state.fontSize || 16;
   const bw = state.borderWidth || 2;
   const container = document.getElementById('calendar-container');
   document.getElementById('calendar-body').style.setProperty('--cal-height', h + 'px');
