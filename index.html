@@ -159,7 +159,7 @@ body {
   height: 20px;
   border-radius: 3px;
   padding: 0 7px;
-  font-size: 11px;
+  font-size: var(--fs-event, 13px);
   font-weight: 700;
   display: flex;
   align-items: center;
@@ -214,7 +214,7 @@ body {
 .day-items { display: flex; flex-direction: column; gap: 2px; flex: 1; min-height: 0; overflow: hidden; }
 
 .day-text-item {
-  font-size: var(--fs-text, 13px);
+  font-size: 13px;
   color: #c8d6ce;
   line-height: 1.4;
   word-break: keep-all;
@@ -908,7 +908,7 @@ select.form-input { cursor: pointer; }
         <div style="text-align:right; font-size:12px; color:#aaa; margin-top:4px">최대 <span id="max-event-rows-label">3</span>줄</div>
       </div>
       <div class="form-group">
-        <label class="form-label">텍스트 크기</label>
+        <label class="form-label">이벤트 바 글자 크기</label>
         <input type="range" id="s-font-size" min="9" max="20" step="1" value="13" oninput="previewFontSize(this.value)">
         <div style="text-align:right; font-size:12px; color:#aaa; margin-top:4px"><span id="font-size-label">13</span>px</div>
       </div>
@@ -1896,7 +1896,7 @@ function previewMaxEventRows(val) {
 }
 function previewFontSize(val) {
   document.getElementById('font-size-label').textContent = val;
-  document.getElementById('calendar-container').style.setProperty('--fs-text', val + 'px');
+  document.getElementById('calendar-container').style.setProperty('--fs-event', val + 'px');
 }
 function previewBorderWidth(val) {
   document.getElementById('border-width-label').textContent = val;
@@ -1919,7 +1919,7 @@ function applyCalendarStyles() {
   const bw = state.borderWidth || 2;
   const container = document.getElementById('calendar-container');
   document.getElementById('calendar-body').style.setProperty('--cal-height', h + 'px');
-  container.style.setProperty('--fs-text', fs + 'px');
+  container.style.setProperty('--fs-event', fs + 'px');
   container.style.setProperty('--border-w', bw + 'px');
 }
 
