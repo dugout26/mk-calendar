@@ -109,10 +109,10 @@ body {
   max-width: 1100px;
   margin: 0 auto;
   background: var(--card);
-  border-radius: 10px;
+  border-radius: 0;
   border: var(--border-w, 2px) solid var(--green2);
   box-shadow: 0 4px 32px rgba(34,197,94,0.15), 0 2px 8px rgba(0,0,0,0.5);
-  overflow: hidden;
+  overflow: visible;
 }
 
 #calendar-body {
@@ -1194,11 +1194,23 @@ function renderBody() {
     weekGrid.className = 'week-grid';
     weekGrid.style.gridTemplateRows = '1fr';
 
+    // 이미지 있는 셀들의 이벤트 공간 통일 (하단선 맞추기)
+    let maxColRowsForImage = 0;
+    wk.forEach((cell, idx) => {
+      const key = dk(cell.y, cell.m, cell.d);
+      const data = state.dayData[key] || { items: [] };
+      const hasImage = data.items && data.items.some(it => it.type === 'image');
+      if (hasImage && colRows[idx] > maxColRowsForImage) {
+        maxColRowsForImage = colRows[idx];
+      }
+    });
+
     // ── Day cells (날짜번호 + 이벤트배너 공간 + 콘텐츠 통합) ──
     wk.forEach((cell, idx) => {
       const key  = dk(cell.y, cell.m, cell.d);
       const data = state.dayData[key] || { items: [] };
       const isToday = key === today;
+      const hasImage = data.items && data.items.some(it => it.type === 'image');
 
       const dayCell = document.createElement('div');
       let cls = 'day-cell-unified';
@@ -1216,11 +1228,12 @@ function renderBody() {
       dn.textContent = cell.d;
       dayCell.appendChild(dn);
 
-      // 이벤트 배너 공간 (컬럼별 독립 높이)
-      if (colRows[idx] > 0) {
+      // 이벤트 배너 공간 (이미지 있는 셀은 통일된 높이 사용)
+      const spaceRows = hasImage ? Math.max(colRows[idx], maxColRowsForImage) : colRows[idx];
+      if (spaceRows > 0) {
         const evSpace = document.createElement('div');
         evSpace.className = 'day-event-space';
-        evSpace.style.minHeight = (colRows[idx] * 24) + 'px';
+        evSpace.style.minHeight = (spaceRows * 24) + 'px';
         dayCell.appendChild(evSpace);
       }
 
