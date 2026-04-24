@@ -171,7 +171,18 @@ http.createServer(async (req, res) => {
         });
 
         const el = await page.$('#calendar-container');
-        const screenshot = await el.screenshot({ type: 'png' });
+        const box = await el.boundingBox();
+        // el.screenshot()은 bbox를 픽셀 단위로 반올림하면서 외곽 테두리가 잘릴 수 있음
+        // page.screenshot({clip})으로 여유분 1px씩 확보하여 테두리 보존
+        const screenshot = await page.screenshot({
+          type: 'png',
+          clip: {
+            x: Math.max(0, Math.floor(box.x) - 1),
+            y: Math.max(0, Math.floor(box.y) - 1),
+            width: Math.ceil(box.width) + 2,
+            height: Math.ceil(box.height) + 2,
+          },
+        });
         await browser.close();
         browser = null;
 
