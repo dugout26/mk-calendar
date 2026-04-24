@@ -170,17 +170,28 @@ http.createServer(async (req, res) => {
           if (tb) tb.style.display = 'none';
         });
 
+        // 콘텐츠가 뷰포트보다 크면 바깥쪽은 캡처 안 되므로 뷰포트를 콘텐츠에 맞게 확장
+        const elForSize = await page.$('#calendar-container');
+        const preBox = await elForSize.boundingBox();
+        await page.setViewport({
+          width: 1200,
+          height: Math.ceil(preBox.y + preBox.height + 50),
+          deviceScaleFactor: scale,
+        });
+        await new Promise(r => setTimeout(r, 300));
+
         const el = await page.$('#calendar-container');
         const box = await el.boundingBox();
         // el.screenshot() 쓰면 bbox 반올림 때문에 외곽 2px 테두리 끝이 잘림
-        // page.screenshot({clip})으로 1px 여유 확보해서 모서리 보존
+        // page.screenshot({clip})으로 여유 2px씩 확보해서 모서리 보존
         const screenshot = await page.screenshot({
           type: 'png',
+          captureBeyondViewport: true,
           clip: {
-            x: Math.max(0, Math.floor(box.x) - 1),
-            y: Math.max(0, Math.floor(box.y) - 1),
-            width: Math.ceil(box.width) + 2,
-            height: Math.ceil(box.height) + 2,
+            x: Math.max(0, Math.floor(box.x) - 2),
+            y: Math.max(0, Math.floor(box.y) - 2),
+            width: Math.ceil(box.width) + 4,
+            height: Math.ceil(box.height) + 4,
           },
         });
         await browser.close();
