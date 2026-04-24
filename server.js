@@ -170,28 +170,27 @@ http.createServer(async (req, res) => {
           if (tb) tb.style.display = 'none';
         });
 
-        // 콘텐츠가 뷰포트보다 크면 바깥쪽은 캡처 안 되므로 뷰포트를 콘텐츠에 맞게 확장
-        const elForSize = await page.$('#calendar-container');
-        const preBox = await elForSize.boundingBox();
-        await page.setViewport({
-          width: 1200,
-          height: Math.ceil(preBox.y + preBox.height + 50),
-          deviceScaleFactor: scale,
+        // 뷰포트는 그대로 두고, JS로 픽셀 단위 정확한 box를 구해 clip
+        // (el.boundingBox는 소수점 반환 → 반올림 때문에 테두리 잘림)
+        const box = await page.evaluate(() => {
+          const c = document.getElementById('calendar-container');
+          const r = c.getBoundingClientRect();
+          return {
+            x: Math.floor(r.left + window.scrollX),
+            y: Math.floor(r.top + window.scrollY),
+            width: Math.ceil(r.right - r.left),
+            height: Math.ceil(r.bottom - r.top),
+          };
         });
-        await new Promise(r => setTimeout(r, 300));
-
-        const el = await page.$('#calendar-container');
-        const box = await el.boundingBox();
-        // el.screenshot() 쓰면 bbox 반올림 때문에 외곽 2px 테두리 끝이 잘림
-        // page.screenshot({clip})으로 여유 2px씩 확보해서 모서리 보존
+        // captureBeyondViewport: true로 뷰포트 바깥 영역도 캡처 가능
         const screenshot = await page.screenshot({
           type: 'png',
           captureBeyondViewport: true,
           clip: {
-            x: Math.max(0, Math.floor(box.x) - 2),
-            y: Math.max(0, Math.floor(box.y) - 2),
-            width: Math.ceil(box.width) + 4,
-            height: Math.ceil(box.height) + 4,
+            x: Math.max(0, box.x - 1),
+            y: Math.max(0, box.y - 1),
+            width: box.width + 2,
+            height: box.height + 2,
           },
         });
         await browser.close();
