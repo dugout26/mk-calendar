@@ -143,13 +143,15 @@ http.createServer(async (req, res) => {
     req.on('end', async () => {
       let browser;
       try {
-        const { state: calState } = JSON.parse(body);
+        const { state: calState, scale: rawScale } = JSON.parse(body);
+        const ALLOWED_SCALES = [1, 1.5, 2];
+        const scale = ALLOWED_SCALES.includes(Number(rawScale)) ? Number(rawScale) : 1;
         browser = await puppeteer.launch({
           headless: 'new',
           args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
         });
         const page = await browser.newPage();
-        await page.setViewport({ width: 1200, height: 900, deviceScaleFactor: 2 });
+        await page.setViewport({ width: 1200, height: 900, deviceScaleFactor: scale });
         await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'networkidle0', timeout: 15000 });
 
         if (calState) {

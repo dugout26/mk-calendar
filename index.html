@@ -949,18 +949,29 @@ select.form-input { cursor: pointer; }
 </div>
 
 <div id="toast"></div>
-<button id="export-btn" onclick="exportAsPng('calendar')">이미지로 저장</button>
+<button id="export-btn" onclick="showExportModal()">이미지로 저장</button>
 
-<!-- ===== 내보내기 범위 선택 모달 ===== -->
+<!-- ===== 내보내기 해상도 선택 모달 ===== -->
 <div class="modal-overlay" id="export-modal-overlay">
-  <div class="modal" style="max-width:300px">
+  <div class="modal" style="max-width:340px">
     <div class="modal-header">
-      <span class="modal-title-text">저장 범위 선택</span>
+      <span class="modal-title-text">저장 해상도 선택</span>
       <button class="modal-close" onclick="closeExportModal()">×</button>
     </div>
     <div style="display:flex; flex-direction:column; gap:10px; margin-top:8px">
-      <button class="btn btn-primary" onclick="exportAsPng('all')">전체 (제목 + 달력)</button>
-      <button class="btn btn-secondary" onclick="exportAsPng('calendar')">달력만</button>
+      <label style="display:flex; align-items:center; gap:8px; cursor:pointer; padding:8px; border:1px solid var(--border); border-radius:6px">
+        <input type="radio" name="export-scale" value="1" checked>
+        <span>1100 × 1329 <span style="color:var(--text2); font-size:12px">(기본, 카페 업로드 권장)</span></span>
+      </label>
+      <label style="display:flex; align-items:center; gap:8px; cursor:pointer; padding:8px; border:1px solid var(--border); border-radius:6px">
+        <input type="radio" name="export-scale" value="1.5">
+        <span>1650 × 1994 <span style="color:var(--text2); font-size:12px">(중간)</span></span>
+      </label>
+      <label style="display:flex; align-items:center; gap:8px; cursor:pointer; padding:8px; border:1px solid var(--border); border-radius:6px">
+        <input type="radio" name="export-scale" value="2">
+        <span>2200 × 2658 <span style="color:var(--text2); font-size:12px">(고화질)</span></span>
+      </label>
+      <button class="btn btn-primary" onclick="exportAsPngFromModal()">저장</button>
       <button class="btn btn-secondary" onclick="closeExportModal()">취소</button>
     </div>
   </div>
@@ -2311,7 +2322,15 @@ function closeExportModal() {
   document.getElementById('export-modal-overlay').classList.remove('active');
 }
 
-async function exportAsPng(range) {
+function exportAsPngFromModal() {
+  const selected = document.querySelector('input[name="export-scale"]:checked');
+  const scale = selected ? parseFloat(selected.value) : 1;
+  closeExportModal();
+  exportAsPng(scale);
+}
+
+async function exportAsPng(scale) {
+  const s = [1, 1.5, 2].includes(Number(scale)) ? Number(scale) : 1;
   const btn = document.getElementById('export-btn');
   btn.textContent = '⏳ 캡처 중...';
   btn.disabled = true;
@@ -2319,7 +2338,7 @@ async function exportAsPng(range) {
     const resp = await fetch('/api/calendar-screenshot', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ state })
+      body: JSON.stringify({ state, scale: s })
     });
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({ error: 'Unknown' }));
@@ -2345,7 +2364,7 @@ async function exportAsPng(range) {
       exportBtn.style.display = 'none';
       const target = document.getElementById('calendar-container');
       const dataUrl = await htmlToImage.toPng(target, {
-        pixelRatio: 2, cacheBust: true,
+        pixelRatio: s, cacheBust: true,
         width: target.scrollWidth, height: target.scrollHeight,
       });
       toolbar.style.display = '';
