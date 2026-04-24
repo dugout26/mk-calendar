@@ -180,6 +180,20 @@ http.createServer(async (req, res) => {
           if (tb) tb.style.display = 'none';
         });
 
+        // 타겟 비율에 맞춰 캘린더 바디 높이 조정 (패딩 없이 꽉 채우기)
+        const targetRatio = target.height / target.width;
+        await page.evaluate((ratio) => {
+          const container = document.getElementById('calendar-container');
+          const body = document.getElementById('calendar-body');
+          if (!container || !body) return;
+          const cw = container.offsetWidth;
+          const targetH = cw * ratio;
+          const curH = container.offsetHeight;
+          const delta = targetH - curH;
+          body.style.height = (body.offsetHeight + delta) + 'px';
+        }, targetRatio);
+        await new Promise(r => setTimeout(r, 200));
+
         const el = await page.$('#calendar-container');
         const box = await el.boundingBox();
         // page.screenshot({clip})으로 1px 여유 확보해 외곽 테두리 잘림 방지
@@ -195,13 +209,12 @@ http.createServer(async (req, res) => {
         await browser.close();
         browser = null;
 
-        // sharp로 타겟 해상도 정확히 맞추기 (비율 유지 + 배경색 패딩)
+        // 캡처 전에 이미 타겟 비율로 조정했으므로 fill로 정확한 픽셀만 맞춤 (왜곡 없음)
         let finalScreenshot = rawScreenshot;
         if (sharp) {
           finalScreenshot = await sharp(rawScreenshot)
             .resize(target.width, target.height, {
-              fit: 'contain',
-              background: { r: 8, g: 15, b: 10, alpha: 1 }, // #080f0a (calendar bg)
+              fit: 'fill',
               kernel: 'lanczos3',
             })
             .png({ compressionLevel: 9 })
