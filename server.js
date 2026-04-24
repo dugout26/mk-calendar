@@ -4,6 +4,15 @@ const fs = require('fs');
 const path = require('path');
 let puppeteer;
 try { puppeteer = require('puppeteer'); } catch(e) { console.log('Puppeteer not available'); }
+let sharp;
+try { sharp = require('sharp'); } catch(e) { console.log('Sharp not available'); }
+
+// 캡처 출력 규격 (고정 픽셀 크기)
+const EXPORT_SIZES = {
+  1:   { width: 1100, height: 1329 },
+  1.5: { width: 1650, height: 1994 },
+  2:   { width: 2200, height: 2658 },
+};
 
 const PORT = process.env.PORT || 3001;
 
@@ -144,14 +153,15 @@ http.createServer(async (req, res) => {
       let browser;
       try {
         const { state: calState, scale: rawScale } = JSON.parse(body);
-        const ALLOWED_SCALES = [1, 1.5, 2];
-        const scale = ALLOWED_SCALES.includes(Number(rawScale)) ? Number(rawScale) : 1;
+        const scale = EXPORT_SIZES[Number(rawScale)] ? Number(rawScale) : 1;
+        const target = EXPORT_SIZES[scale];
         browser = await puppeteer.launch({
           headless: 'new',
           args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
         });
         const page = await browser.newPage();
-        await page.setViewport({ width: 1200, height: 900, deviceScaleFactor: scale });
+        // 항상 2배율로 찍어서 supersampling 효과 (글자 부드러움 향상)
+        await page.setViewport({ width: 1200, height: 900, deviceScaleFactor: 2 });
         await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'networkidle0', timeout: 15000 });
 
         if (calState) {
@@ -172,9 +182,8 @@ http.createServer(async (req, res) => {
 
         const el = await page.$('#calendar-container');
         const box = await el.boundingBox();
-        // el.screenshot()은 bbox를 픽셀 단위로 반올림하면서 외곽 테두리가 잘릴 수 있음
-        // page.screenshot({clip})으로 여유분 1px씩 확보하여 테두리 보존
-        const screenshot = await page.screenshot({
+        // page.screenshot({clip})으로 1px 여유 확보해 외곽 테두리 잘림 방지
+        const rawScreenshot = await page.screenshot({
           type: 'png',
           clip: {
             x: Math.max(0, Math.floor(box.x) - 1),
@@ -186,11 +195,24 @@ http.createServer(async (req, res) => {
         await browser.close();
         browser = null;
 
+        // sharp로 타겟 해상도 정확히 맞추기 (비율 유지 + 배경색 패딩)
+        let finalScreenshot = rawScreenshot;
+        if (sharp) {
+          finalScreenshot = await sharp(rawScreenshot)
+            .resize(target.width, target.height, {
+              fit: 'contain',
+              background: { r: 8, g: 15, b: 10, alpha: 1 }, // #080f0a (calendar bg)
+              kernel: 'lanczos3',
+            })
+            .png({ compressionLevel: 9 })
+            .toBuffer();
+        }
+
         res.writeHead(200, {
           'Content-Type': 'image/png',
           'Content-Disposition': 'attachment; filename="calendar.png"'
         });
-        res.end(screenshot);
+        res.end(finalScreenshot);
       } catch(e) {
         console.error('Screenshot error:', e);
         if (browser) await browser.close().catch(() => {});
