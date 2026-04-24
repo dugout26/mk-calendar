@@ -4,8 +4,6 @@ const fs = require('fs');
 const path = require('path');
 let puppeteer;
 try { puppeteer = require('puppeteer'); } catch(e) { console.log('Puppeteer not available'); }
-let sharp;
-try { sharp = require('sharp'); } catch(e) { console.log('Sharp not available'); }
 
 const PORT = process.env.PORT || 3001;
 
@@ -145,15 +143,15 @@ http.createServer(async (req, res) => {
     req.on('end', async () => {
       let browser;
       try {
-        const { state: calState } = JSON.parse(body);
-        // 내부적으로 2배율로 찍고 sharp로 1배 크기로 다운스케일 (supersampling)
-        const RENDER_DPR = 2;
+        const { state: calState, scale: rawScale } = JSON.parse(body);
+        const ALLOWED_SCALES = [1, 1.5, 2];
+        const scale = ALLOWED_SCALES.includes(Number(rawScale)) ? Number(rawScale) : 1;
         browser = await puppeteer.launch({
           headless: 'new',
           args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
         });
         const page = await browser.newPage();
-        await page.setViewport({ width: 1200, height: 900, deviceScaleFactor: RENDER_DPR });
+        await page.setViewport({ width: 1200, height: 900, deviceScaleFactor: scale });
         await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'networkidle0', timeout: 15000 });
 
         if (calState) {
@@ -172,42 +170,37 @@ http.createServer(async (req, res) => {
           if (tb) tb.style.display = 'none';
         });
 
-        // 정수 CSS 픽셀 단위로 캘린더 박스 산출 (서브픽셀 잘림 방지)
+        // 뷰포트는 그대로 두고, JS로 픽셀 단위 정확한 box를 구해 clip
+        // (el.boundingBox는 소수점 반환 → 반올림 때문에 테두리 잘림)
         const box = await page.evaluate(() => {
           const c = document.getElementById('calendar-container');
           const r = c.getBoundingClientRect();
-          const x = Math.floor(r.left + window.scrollX);
-          const y = Math.floor(r.top + window.scrollY);
           return {
-            x,
-            y,
-            width: Math.ceil(r.right + window.scrollX) - x,
-            height: Math.ceil(r.bottom + window.scrollY) - y,
+            x: Math.floor(r.left + window.scrollX),
+            y: Math.floor(r.top + window.scrollY),
+            width: Math.ceil(r.right - r.left),
+            height: Math.ceil(r.bottom - r.top),
           };
         });
-        // 2배율로 캡처 (captureBeyondViewport: 뷰포트 바깥도 포함)
-        const rawScreenshot = await page.screenshot({
+        // captureBeyondViewport: true로 뷰포트 바깥 영역도 캡처 가능
+        const screenshot = await page.screenshot({
           type: 'png',
           captureBeyondViewport: true,
-          clip: { x: box.x, y: box.y, width: box.width, height: box.height },
+          clip: {
+            x: Math.max(0, box.x - 1),
+            y: Math.max(0, box.y - 1),
+            width: box.width + 2,
+            height: box.height + 2,
+          },
         });
         await browser.close();
         browser = null;
-
-        // sharp로 1배 크기로 다운스케일 (lanczos3 → 선명도 향상)
-        let finalScreenshot = rawScreenshot;
-        if (sharp) {
-          finalScreenshot = await sharp(rawScreenshot)
-            .resize(box.width, box.height, { kernel: 'lanczos3' })
-            .png({ compressionLevel: 9 })
-            .toBuffer();
-        }
 
         res.writeHead(200, {
           'Content-Type': 'image/png',
           'Content-Disposition': 'attachment; filename="calendar.png"'
         });
-        res.end(finalScreenshot);
+        res.end(screenshot);
       } catch(e) {
         console.error('Screenshot error:', e);
         if (browser) await browser.close().catch(() => {});
