@@ -2345,12 +2345,22 @@ async function exportAsPng(scale) {
   // 레이아웃 반영 대기
   await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
   try {
-    const dataUrl = await htmlToImage.toPng(target, {
-      pixelRatio: 1,
+    const captureH = target.scrollHeight;
+    // 2배율로 캡처 → 1배 크기로 다운스케일 (supersampling: 글자 선명도↑, 출력 크기는 1100×H 유지)
+    const hiCanvas = await htmlToImage.toCanvas(target, {
+      pixelRatio: 2,
       cacheBust: true,
       width: FIXED_WIDTH,
-      height: target.scrollHeight,
+      height: captureH,
     });
+    const finalCanvas = document.createElement('canvas');
+    finalCanvas.width = FIXED_WIDTH;
+    finalCanvas.height = captureH;
+    const ctx = finalCanvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(hiCanvas, 0, 0, FIXED_WIDTH, captureH);
+    const dataUrl = finalCanvas.toDataURL('image/png');
     const link = document.createElement('a');
     const MONTHS = ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
     link.download = `캘린더_${state.year}년_${MONTHS[state.month-1]}.png`;
