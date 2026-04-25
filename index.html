@@ -2332,16 +2332,23 @@ function exportAsPngFromModal() {
 async function exportAsPng(scale) {
   const btn = document.getElementById('export-btn');
   const toolbar = document.getElementById('toolbar');
+  const target = document.getElementById('calendar-container');
+  const FIXED_WIDTH = 1100;
   btn.textContent = '⏳ 캡처 중...';
   btn.disabled = true;
   toolbar.style.display = 'none';
   btn.style.visibility = 'hidden';
+  // 캡처 동안 캘린더 너비를 1100px로 강제 (브라우저 창 너비와 무관하게 동일 결과)
+  const orig = { width: target.style.width, minWidth: target.style.minWidth };
+  target.style.width = FIXED_WIDTH + 'px';
+  target.style.minWidth = FIXED_WIDTH + 'px';
+  // 레이아웃 반영 대기
+  await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
   try {
-    const target = document.getElementById('calendar-container');
     const dataUrl = await htmlToImage.toPng(target, {
       pixelRatio: 1,
       cacheBust: true,
-      width: target.scrollWidth,
+      width: FIXED_WIDTH,
       height: target.scrollHeight,
     });
     const link = document.createElement('a');
@@ -2354,6 +2361,8 @@ async function exportAsPng(scale) {
     console.error(e);
     toast('내보내기 실패');
   } finally {
+    target.style.width = orig.width;
+    target.style.minWidth = orig.minWidth;
     toolbar.style.display = '';
     btn.style.visibility = '';
     btn.textContent = '이미지로 저장';
