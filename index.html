@@ -1037,9 +1037,137 @@ let currentBgType = 'color';
 let currentTitleStyleType = 'gradient';
 let selectedTitleGradient = TITLE_GRADIENTS[0];
 
+// ===== 이미지 정렬 정책 =====
+// 이미지 있는 셀의 이벤트 공간을 항상 N줄만큼 확보 → 캘린더 전체에서 이미지 시작 Y 통일
+const IMAGE_EVENT_ROWS_RESERVE = 5;
+
+// ===== INDEXEDDB IMAGE STORE =====
+const IDB_NAME = 'mk-calendar-images';
+const IDB_STORE = 'images';
+const IDB_REF_PREFIX = 'idb:';
+let idbDB = null;
+const imageCache = new Map(); // id -> blob URL
+
+function idbOpen() {
+  return new Promise((resolve, reject) => {
+    if (!('indexedDB' in window)) return reject(new Error('IDB unavailable'));
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = e => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) {
+        db.createObjectStore(IDB_STORE, { keyPath: 'id' });
+      }
+    };
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror = e => reject(e.target.error);
+  });
+}
+
+function idbPut(id, blob) {
+  return new Promise((resolve, reject) => {
+    if (!idbDB) return reject(new Error('IDB not ready'));
+    const tx = idbDB.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put({ id, blob });
+    tx.oncomplete = () => resolve();
+    tx.onerror = e => reject(e.target.error);
+  });
+}
+
+function idbDelete(id) {
+  return new Promise(resolve => {
+    if (!idbDB) return resolve();
+    const tx = idbDB.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => resolve();
+  });
+}
+
+function idbGetAll() {
+  return new Promise(resolve => {
+    if (!idbDB) return resolve([]);
+    const tx = idbDB.transaction(IDB_STORE, 'readonly');
+    const req = tx.objectStore(IDB_STORE).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => resolve([]);
+  });
+}
+
+function isIdbRef(s) { return typeof s === 'string' && s.startsWith(IDB_REF_PREFIX); }
+function refToId(s) { return s.slice(IDB_REF_PREFIX.length); }
+function idToRef(id) { return IDB_REF_PREFIX + id; }
+
+function cacheBlob(id, blob) {
+  const old = imageCache.get(id);
+  if (old) URL.revokeObjectURL(old);
+  const url = URL.createObjectURL(blob);
+  imageCache.set(id, url);
+  return url;
+}
+
+function resolveImgSrc(s) {
+  if (!s) return '';
+  if (isIdbRef(s)) return imageCache.get(refToId(s)) || '';
+  return s; // legacy data URL or external URL
+}
+
+async function storeImageBlob(blob) {
+  const id = uid();
+  await idbPut(id, blob);
+  cacheBlob(id, blob);
+  return idToRef(id);
+}
+
+async function storeImageDataUrl(dataUrl) {
+  const blob = await (await fetch(dataUrl)).blob();
+  return storeImageBlob(blob);
+}
+
+async function deleteImageRef(ref) {
+  if (!isIdbRef(ref)) return;
+  const id = refToId(ref);
+  const url = imageCache.get(id);
+  if (url) { URL.revokeObjectURL(url); imageCache.delete(id); }
+  await idbDelete(id);
+}
+
+// 기존 base64 데이터 → IDB 자동 이전
+async function migrateBase64ToIdb() {
+  let changed = 0;
+  for (const key of Object.keys(state.dayData || {})) {
+    const items = state.dayData[key]?.items || [];
+    for (const item of items) {
+      if (item.type === 'image' && typeof item.src === 'string' && item.src.startsWith('data:')) {
+        try { item.src = await storeImageDataUrl(item.src); changed++; }
+        catch(e) { console.error('migrate day image failed', key, e); }
+      }
+    }
+  }
+  for (const k of ['titleImage', 'titleIconData']) {
+    if (typeof state[k] === 'string' && state[k].startsWith('data:')) {
+      try { state[k] = await storeImageDataUrl(state[k]); changed++; }
+      catch(e) { console.error('migrate', k, 'failed', e); }
+    }
+  }
+  if (state.background?.image && typeof state.background.image === 'string' && state.background.image.startsWith('data:')) {
+    try { state.background.image = await storeImageDataUrl(state.background.image); changed++; }
+    catch(e) { console.error('migrate bg image failed', e); }
+  }
+  if (changed > 0) {
+    saveState();
+    toast(`이미지 ${changed}개를 새 저장소로 이전했습니다`);
+  }
+}
+
 // ===== PERSISTENCE =====
 function saveState() {
-  try { localStorage.setItem('my-calendar-v1', JSON.stringify(state)); } catch(e) {}
+  try { localStorage.setItem('my-calendar-v1', JSON.stringify(state)); }
+  catch(e) {
+    if (e && (e.name === 'QuotaExceededError' || e.code === 22)) {
+      toast('저장 공간이 가득 찼습니다');
+    }
+    console.error('saveState failed:', e);
+  }
 }
 function loadState() {
   try {
@@ -1097,7 +1225,7 @@ function applyBackground() {
       w.style.background = `linear-gradient(${g.direction}, ${g.color1}, ${g.color2}${c3part})`;
     }
   } else if (bg.type === 'image' && bg.image) {
-    w.style.background = `url(${bg.image}) center/cover no-repeat fixed`;
+    w.style.background = `url(${resolveImgSrc(bg.image)}) center/cover no-repeat fixed`;
   }
 }
 
@@ -1112,7 +1240,7 @@ function applyTitle() {
   if (iconMode === 'none') {
     iconEl.style.display = 'none';
   } else if (iconMode === 'custom' && state.titleIconData) {
-    iconEl.src = state.titleIconData;
+    iconEl.src = resolveImgSrc(state.titleIconData);
     iconEl.style.display = '';
   } else {
     iconEl.src = 'icon.png';
@@ -1121,7 +1249,7 @@ function applyTitle() {
 
   if (state.titleImage) {
     textEl.style.display = 'none';
-    imgEl.src = state.titleImage;
+    imgEl.src = resolveImgSrc(state.titleImage);
     imgEl.style.display = 'block';
     titleEl.style.backgroundImage = 'none';
     titleEl.style.webkitTextFillColor = 'unset';
@@ -1205,16 +1333,8 @@ function renderBody() {
     weekGrid.className = 'week-grid';
     weekGrid.style.gridTemplateRows = '1fr';
 
-    // 이미지 있는 셀들의 이벤트 공간 통일 (하단선 맞추기)
-    let maxColRowsForImage = 0;
-    wk.forEach((cell, idx) => {
-      const key = dk(cell.y, cell.m, cell.d);
-      const data = state.dayData[key] || { items: [] };
-      const hasImage = data.items && data.items.some(it => it.type === 'image');
-      if (hasImage && colRows[idx] > maxColRowsForImage) {
-        maxColRowsForImage = colRows[idx];
-      }
-    });
+    // 이미지 있는 셀들의 이벤트 공간을 IMAGE_EVENT_ROWS_RESERVE줄로 통일
+    // → 캘린더 전체에서 이미지 시작 Y 일치 (주 단위가 아니라 전체 단위 통일)
 
     // ── Day cells (날짜번호 + 이벤트배너 공간 + 콘텐츠 통합) ──
     wk.forEach((cell, idx) => {
@@ -1239,8 +1359,8 @@ function renderBody() {
       dn.textContent = cell.d;
       dayCell.appendChild(dn);
 
-      // 이벤트 배너 공간 (이미지 있는 셀은 통일된 높이 사용)
-      const spaceRows = hasImage ? Math.max(colRows[idx], maxColRowsForImage) : colRows[idx];
+      // 이벤트 배너 공간 (이미지 있는 셀은 항상 IMAGE_EVENT_ROWS_RESERVE줄 확보 → 이미지 Y 통일)
+      const spaceRows = hasImage ? Math.max(colRows[idx], IMAGE_EVENT_ROWS_RESERVE) : colRows[idx];
       if (spaceRows > 0) {
         const evSpace = document.createElement('div');
         evSpace.className = 'day-event-space';
@@ -1262,7 +1382,7 @@ function renderBody() {
             const wrap = document.createElement('div');
             wrap.className = 'day-image-item';
             const img = document.createElement('img');
-            img.src = item.src;
+            img.src = resolveImgSrc(item.src);
             img.alt = item.caption || '';
             wrap.appendChild(img);
             if (item.caption) {
@@ -1626,7 +1746,11 @@ function renderItemsList() {
 
     const del = document.createElement('button');
     del.className = 'item-delete-btn'; del.textContent = '×';
-    del.onclick = () => { currentDayItems.splice(idx, 1); renderItemsList(); saveDayData(); };
+    del.onclick = () => {
+      const removed = currentDayItems.splice(idx, 1)[0];
+      if (removed && removed.type === 'image') deleteImageRef(removed.src);
+      renderItemsList(); saveDayData();
+    };
     row.appendChild(del);
 
     list.appendChild(row);
@@ -1637,18 +1761,19 @@ function renderItemsList() {
 function handleImageUpload(e) {
   const file = e.target.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = ev => {
-    const caption = document.getElementById('image-caption-input').value.trim();
-    currentDayItems.push({ type: 'image', src: ev.target.result, caption });
+  const caption = document.getElementById('image-caption-input').value.trim();
+  storeImageBlob(file).then(ref => {
+    currentDayItems.push({ type: 'image', src: ref, caption });
     document.getElementById('image-caption-input').value = '';
     e.target.value = '';
     renderItemsList();
     saveDayData();
     switchDayTab('text');
     toast('이미지 추가됨');
-  };
-  reader.readAsDataURL(file);
+  }).catch(err => {
+    console.error(err);
+    toast('이미지 저장 실패');
+  });
 }
 
 function saveDayData() {
@@ -1661,6 +1786,8 @@ function saveDayData() {
 
 function clearDayData() {
   if (!confirm('이 날의 모든 내용을 삭제할까요?')) return;
+  // IDB에 들어있는 이미지들도 같이 정리
+  currentDayItems.forEach(it => { if (it.type === 'image') deleteImageRef(it.src); });
   currentDayItems = [];
   delete state.dayData[currentDayKey];
   saveState();
@@ -1870,7 +1997,7 @@ function openSettings(tab) {
 
   // Restore title image preview
   if (state.titleImage) {
-    document.getElementById('title-img-preview-el').src = state.titleImage;
+    document.getElementById('title-img-preview-el').src = resolveImgSrc(state.titleImage);
     document.getElementById('title-img-preview-wrap').style.display = 'block';
   } else {
     document.getElementById('title-img-preview-wrap').style.display = 'none';
@@ -1879,7 +2006,7 @@ function openSettings(tab) {
   // Restore icon settings
   selectTitleIcon(state.titleIconMode || 'default', true);
   if (state.titleIconData) {
-    document.getElementById('title-icon-preview-el').src = state.titleIconData;
+    document.getElementById('title-icon-preview-el').src = resolveImgSrc(state.titleIconData);
     document.getElementById('title-icon-preview-wrap').style.display = 'block';
   } else {
     document.getElementById('title-icon-preview-wrap').style.display = 'none';
@@ -2007,46 +2134,52 @@ function previewBgGradient() {
 function handleBgImageUpload(e) {
   const file = e.target.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = ev => {
-    state.background.image = ev.target.result;
+  const oldRef = state.background.image;
+  storeImageBlob(file).then(ref => {
+    state.background.image = ref;
     state.background.type = 'image';
     currentBgType = 'image';
     applyBackground();
+    saveState();
+    if (oldRef) deleteImageRef(oldRef);
     toast('배경 이미지 설정됨');
-  };
-  reader.readAsDataURL(file);
+  }).catch(err => { console.error(err); toast('배경 이미지 저장 실패'); });
 }
 
 function clearBgImage() {
+  const oldRef = state.background.image;
   state.background.image = null;
   document.getElementById('calendar-wrapper').style.background = '#f0f0f5';
+  saveState();
+  if (oldRef) deleteImageRef(oldRef);
   toast('배경 이미지 제거됨');
 }
 
 function handleTitleImageUpload(e) {
   const file = e.target.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = ev => {
-    state.titleImage = ev.target.result;
+  const oldRef = state.titleImage;
+  storeImageBlob(file).then(ref => {
+    state.titleImage = ref;
     const previewEl  = document.getElementById('title-img-preview-el');
     const previewDiv = document.getElementById('title-img-preview-wrap');
-    previewEl.src = ev.target.result;
+    previewEl.src = resolveImgSrc(ref);
     previewDiv.style.display = 'block';
     applyTitle();
     saveState();
+    if (oldRef) deleteImageRef(oldRef);
     toast('제목 이미지 설정됨');
-  };
-  reader.readAsDataURL(file);
+  }).catch(err => { console.error(err); toast('제목 이미지 저장 실패'); });
   e.target.value = '';
 }
 
 function clearTitleImage() {
+  const oldRef = state.titleImage;
   state.titleImage = null;
   document.getElementById('title-img-preview-wrap').style.display = 'none';
   applyTitle();
   saveState();
+  if (oldRef) deleteImageRef(oldRef);
   toast('제목 이미지 제거됨');
 }
 
@@ -2120,7 +2253,9 @@ function saveTitleSettings() {
     toast('제목 변경됨');
     return;
   }
+  const oldTitleRef = state.titleImage;
   state.titleImage = null;
+  if (oldTitleRef) deleteImageRef(oldTitleRef);
   state.title = document.getElementById('s-title-text').value || 'MK 캘린더';
   state.titleSize = parseInt(document.getElementById('s-title-size').value) || 60;
   state.titleStyle.type = currentTitleStyleType;
@@ -2351,7 +2486,7 @@ async function exportAsPng(scale) {
     // 2배율로 캡처 → 1배 크기로 다운스케일 (supersampling: 글자 선명도↑, 출력 크기는 1100×H 유지)
     const hiCanvas = await htmlToImage.toCanvas(target, {
       pixelRatio: 2,
-      cacheBust: true,
+      cacheBust: false,
       width: FIXED_WIDTH,
       height: captureH,
     });
@@ -2396,11 +2531,11 @@ function selectTitleIcon(mode, silent) {
 function handleTitleIconUpload(e) {
   const file = e.target.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = ev => {
-    state.titleIconData = ev.target.result;
+  const oldRef = state.titleIconData;
+  storeImageBlob(file).then(ref => {
+    state.titleIconData = ref;
     state.titleIconMode = 'custom';
-    document.getElementById('title-icon-preview-el').src = ev.target.result;
+    document.getElementById('title-icon-preview-el').src = resolveImgSrc(ref);
     document.getElementById('title-icon-preview-wrap').style.display = 'block';
     // 커스텀 탭 버튼 활성화
     document.querySelectorAll('#title-icon-tabs .segment-btn').forEach((b, i) => {
@@ -2408,15 +2543,17 @@ function handleTitleIconUpload(e) {
     });
     applyTitle();
     saveState();
+    if (oldRef) deleteImageRef(oldRef);
     toast('아이콘 변경됨');
-  };
-  reader.readAsDataURL(file);
+  }).catch(err => { console.error(err); toast('아이콘 저장 실패'); });
   e.target.value = '';
 }
 
 function clearTitleIcon() {
+  const oldRef = state.titleIconData;
   state.titleIconData = null;
   state.titleIconMode = 'none';
+  if (oldRef) deleteImageRef(oldRef);
   document.getElementById('title-icon-preview-wrap').style.display = 'none';
   document.getElementById('title-icon-preview-el').src = '';
   document.querySelectorAll('#title-icon-tabs .segment-btn').forEach((b, i) => {
@@ -2454,8 +2591,18 @@ document.addEventListener('keydown', e => {
 });
 
 // ===== INIT =====
-loadState();
-renderAll();
+(async function init() {
+  try {
+    idbDB = await idbOpen();
+    const all = await idbGetAll();
+    all.forEach(rec => cacheBlob(rec.id, rec.blob));
+  } catch(e) {
+    console.error('IDB init failed; images will use legacy path', e);
+  }
+  loadState();
+  await migrateBase64ToIdb();
+  renderAll();
+})();
 </script>
 </body>
 </html>
