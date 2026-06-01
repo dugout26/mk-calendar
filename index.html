@@ -685,11 +685,15 @@ select.form-input { cursor: pointer; }
     </div>
     <div class="form-group">
       <label class="form-label">글자 정렬</label>
-      <div class="radio-group">
-        <label><input type="radio" name="ev-align" value="left" checked> 왼쪽</label>
-        <label><input type="radio" name="ev-align" value="center"> 중앙</label>
-        <label><input type="radio" name="ev-align" value="right"> 오른쪽</label>
+      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <div class="radio-group">
+          <label><input type="radio" name="ev-align" value="left" checked> 왼쪽</label>
+          <label><input type="radio" name="ev-align" value="center"> 중앙</label>
+          <label><input type="radio" name="ev-align" value="right"> 오른쪽</label>
+        </div>
+        <button type="button" class="btn btn-secondary" style="padding:4px 10px; font-size:12px;" onclick="setDefaultEventAlign()">기본값으로 지정</button>
       </div>
+      <div style="font-size:11px; color:var(--text2); margin-top:4px">현재 선택한 정렬을 새 일정의 기본값으로 저장합니다 (현재 기본값: <span id="default-align-label">왼쪽</span>)</div>
     </div>
     <div class="form-group">
       <label class="form-label">반복 요일 (선택)</label>
@@ -1034,7 +1038,8 @@ let state = {
   calendarHeight: 1080,
   maxEventRows: 3,
   fontSize: 0,
-  borderWidth: 2
+  borderWidth: 2,
+  defaultEventAlign: 'left'
 };
 
 let currentDayKey = null;
@@ -1585,7 +1590,9 @@ function openDayModal(key) {
   document.getElementById('event-end-input').value = defaultDate;
   document.getElementById('event-delete-btn').style.display = 'none';
   document.querySelector('input[name="ev-text-color"][value="white"]').checked = true;
-  document.querySelector('input[name="ev-align"][value="left"]').checked = true;
+  const defAlign = state.defaultEventAlign || 'left';
+  document.querySelector(`input[name="ev-align"][value="${defAlign}"]`).checked = true;
+  updateDefaultAlignLabel();
 
   // 색상 그리드 초기화
   selectedEventColor = EVENT_COLORS[0];
@@ -1922,6 +1929,19 @@ function saveEvent() {
     closeDayModal();
     toast('일정 추가됨');
   }
+}
+
+const ALIGN_LABELS = { left: '왼쪽', center: '중앙', right: '오른쪽' };
+function updateDefaultAlignLabel() {
+  const el = document.getElementById('default-align-label');
+  if (el) el.textContent = ALIGN_LABELS[state.defaultEventAlign || 'left'];
+}
+function setDefaultEventAlign() {
+  const align = document.querySelector('input[name="ev-align"]:checked').value;
+  state.defaultEventAlign = align;
+  saveState();
+  updateDefaultAlignLabel();
+  toast(`기본 정렬이 "${ALIGN_LABELS[align]}"(으)로 지정됨`);
 }
 
 function bulkChangeColor() {
