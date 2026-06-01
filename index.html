@@ -684,6 +684,14 @@ select.form-input { cursor: pointer; }
       </div>
     </div>
     <div class="form-group">
+      <label class="form-label">글자 정렬</label>
+      <div class="radio-group">
+        <label><input type="radio" name="ev-align" value="left" checked> 왼쪽</label>
+        <label><input type="radio" name="ev-align" value="center"> 중앙</label>
+        <label><input type="radio" name="ev-align" value="right"> 오른쪽</label>
+      </div>
+    </div>
+    <div class="form-group">
       <label class="form-label">반복 요일 (선택)</label>
       <div class="repeat-days" id="repeat-days-grid">
         <label class="repeat-day-label"><input type="checkbox" value="0"> <span class="sun-text">일</span></label>
@@ -1506,6 +1514,8 @@ function buildEventBars(wk) {
     bar.style.top = (28 + rows[i] * 24) + 'px';
     bar.style.background = ev.color;
     bar.style.color      = ev.textColor || '#fff';
+    bar.style.justifyContent = ev.align === 'center' ? 'center' : (ev.align === 'right' ? 'flex-end' : 'flex-start');
+    bar.style.textAlign  = ev.align || 'left';
     bar.textContent      = ev.text;
     bar.title            = ev.text;
     bar.onclick = e => { e.stopPropagation(); openEventModal(ev.id); };
@@ -1575,6 +1585,7 @@ function openDayModal(key) {
   document.getElementById('event-end-input').value = defaultDate;
   document.getElementById('event-delete-btn').style.display = 'none';
   document.querySelector('input[name="ev-text-color"][value="white"]').checked = true;
+  document.querySelector('input[name="ev-align"][value="left"]').checked = true;
 
   // 색상 그리드 초기화
   selectedEventColor = EVENT_COLORS[0];
@@ -1687,6 +1698,9 @@ function renderDayEventsList(dayKey) {
       });
       document.querySelectorAll('input[name="ev-text-color"]').forEach(r => {
         r.checked = r.value === (ev.textColor === '#000000' ? 'black' : 'white');
+      });
+      document.querySelectorAll('input[name="ev-align"]').forEach(r => {
+        r.checked = r.value === (ev.align || 'left');
       });
     };
 
@@ -1816,6 +1830,9 @@ function openEventModal(id) {
   document.querySelectorAll('input[name="ev-text-color"]').forEach(r => {
     r.checked = r.value === (ev.textColor === '#000000' ? 'black' : 'white');
   });
+  document.querySelectorAll('input[name="ev-align"]').forEach(r => {
+    r.checked = r.value === (ev.align || 'left');
+  });
 }
 
 function closeEventModal() { closeDayModal(); }
@@ -1826,6 +1843,7 @@ function saveEvent() {
   const endDate = document.getElementById('event-end-input').value;
   const tc = document.querySelector('input[name="ev-text-color"]:checked').value;
   const textColor = tc === 'white' ? '#ffffff' : '#000000';
+  const align = document.querySelector('input[name="ev-align"]:checked').value;
   const isEditing = !!currentEventId;
 
   if (!text) {
@@ -1882,7 +1900,7 @@ function saveEvent() {
       const e = group[group.length - 1];
       const sKey = dk(s.getFullYear(), s.getMonth() + 1, s.getDate());
       const eKey = dk(e.getFullYear(), e.getMonth() + 1, e.getDate());
-      state.events.push({ id: uid(), text, startDate: sKey, endDate: eKey, color: selectedEventColor, textColor, repeatGroupId: groupId });
+      state.events.push({ id: uid(), text, startDate: sKey, endDate: eKey, color: selectedEventColor, textColor, align, repeatGroupId: groupId });
       count++;
     });
 
@@ -1892,13 +1910,13 @@ function saveEvent() {
     toast(`${count}개 반복 일정 추가됨 (연속 요일 연결)`);
   } else if (isEditing) {
     const idx = state.events.findIndex(e => e.id === currentEventId);
-    if (idx >= 0) state.events[idx] = { ...state.events[idx], text, startDate, endDate, color: selectedEventColor, textColor };
+    if (idx >= 0) state.events[idx] = { ...state.events[idx], text, startDate, endDate, color: selectedEventColor, textColor, align };
     saveState();
     renderBody();
     closeDayModal();
     toast('일정 수정됨');
   } else {
-    state.events.push({ id: uid(), text, startDate, endDate, color: selectedEventColor, textColor });
+    state.events.push({ id: uid(), text, startDate, endDate, color: selectedEventColor, textColor, align });
     saveState();
     renderBody();
     closeDayModal();
