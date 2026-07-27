@@ -675,6 +675,11 @@ select.form-input { cursor: pointer; }
     <div class="form-group">
       <label class="form-label">배경 색상</label>
       <div class="color-grid" id="event-color-grid"></div>
+      <div style="display:flex; gap:8px; align-items:center; margin-top:8px">
+        <span style="font-size:12px; color:var(--text2); flex-shrink:0">직접 입력</span>
+        <input type="color" id="event-custom-color" value="#ff6b6b" style="width:44px; flex-shrink:0" oninput="pickCustomEventColor(this.value)">
+        <input type="text" class="form-input" id="event-custom-hex" placeholder="#ff6b6b" maxlength="7" spellcheck="false" style="flex:1; padding:6px 8px; font-size:12px" oninput="pickCustomEventHex(this.value)">
+      </div>
     </div>
     <div class="form-group">
       <label class="form-label">텍스트 색상</label>
@@ -744,6 +749,7 @@ select.form-input { cursor: pointer; }
       <button class="tab active" id="stab-btn-title" onclick="switchSettingsTab('title')">제목</button>
       <button class="tab" id="stab-btn-background" onclick="switchSettingsTab('background')">배경</button>
       <button class="tab" id="stab-btn-calendar" onclick="switchSettingsTab('calendar')">달력</button>
+      <button class="tab" id="stab-btn-colors" onclick="switchSettingsTab('colors')">색상</button>
     </div>
 
     <!-- Title settings -->
@@ -931,6 +937,28 @@ select.form-input { cursor: pointer; }
       </div>
       <button class="btn btn-primary" onclick="saveCalSettings()" style="width:100%; margin-top:4px">적용</button>
     </div>
+
+    <!-- Color palette settings -->
+    <div id="stab-colors" style="display:none">
+      <div class="form-group">
+        <label class="form-label">일정 색상 팔레트</label>
+        <div class="color-grid" id="palette-edit-grid"></div>
+        <div style="font-size:11px; color:var(--text2); margin-top:6px">색상을 클릭한 뒤 아래에서 수정하세요. 일정 등록 시 이 팔레트가 표시됩니다.</div>
+      </div>
+      <div class="form-group" id="palette-editor" style="display:none">
+        <label class="form-label">선택한 색상 수정</label>
+        <div style="display:flex; gap:8px; align-items:center">
+          <input type="color" id="palette-color-picker" style="width:44px; flex-shrink:0" oninput="paletteEditColor(this.value)">
+          <input type="text" class="form-input" id="palette-hex-input" placeholder="#ff6b6b" maxlength="7" spellcheck="false" style="flex:1" oninput="paletteEditHex(this.value)">
+          <button class="btn btn-danger" style="padding:8px 12px; font-size:12px; flex-shrink:0" onclick="paletteDeleteColor()">삭제</button>
+        </div>
+      </div>
+      <div style="display:flex; gap:8px; margin-bottom:12px">
+        <button class="btn btn-secondary" style="flex:1" onclick="paletteAddColor()">+ 색상 추가</button>
+        <button class="btn btn-secondary" style="flex:1" onclick="paletteReset()">기본 팔레트로 복원</button>
+      </div>
+      <button class="btn btn-primary" onclick="savePaletteSettings()" style="width:100%">적용</button>
+    </div>
   </div>
 </div>
 
@@ -994,10 +1022,12 @@ select.form-input { cursor: pointer; }
 
 // ===== CONSTANTS =====
 const EVENT_COLORS = [
-  '#ff6b6b','#ff9f43','#feca57','#1dd1a1','#48dbfb',
-  '#ff9ff3','#54a0ff','#5f27cd','#00d2d3','#c8d6e5',
-  '#e84393','#fd79a8','#6c5ce7','#00b894','#fdcb6e',
-  '#e17055','#74b9ff','#a29bfe','#55efc4','#636e72'
+  // 1행: 필수 기본색 (빨 주 노 초 파 남 보 회 분홍 하늘)
+  '#ef4444','#f97316','#facc15','#22c55e','#3b82f6',
+  '#4f46e5','#a855f7','#9ca3af','#ec4899','#38bdf8',
+  // 2행: 보조 파스텔톤
+  '#ff6b6b','#ff9f43','#feca57','#1dd1a1','#00d2d3',
+  '#fd79a8','#a29bfe','#74b9ff','#55efc4','#636e72'
 ];
 
 const TITLE_GRADIENTS = [
@@ -1039,7 +1069,8 @@ let state = {
   maxEventRows: 3,
   fontSize: 0,
   borderWidth: 2,
-  defaultEventAlign: 'left'
+  defaultEventAlign: 'left',
+  customEventColors: null
 };
 
 let currentDayKey = null;
@@ -1201,6 +1232,17 @@ function loadState() {
 }
 
 // ===== HELPERS =====
+function getEventColors() {
+  return (Array.isArray(state.customEventColors) && state.customEventColors.length)
+    ? state.customEventColors : EVENT_COLORS;
+}
+function normalizeHex(v) {
+  if (!v) return null;
+  v = v.trim();
+  if (v[0] !== '#') v = '#' + v;
+  if (/^#[0-9a-fA-F]{3}$/.test(v)) v = '#' + v.slice(1).split('').map(ch => ch + ch).join('');
+  return /^#[0-9a-fA-F]{6}$/.test(v) ? v.toLowerCase() : null;
+}
 function dk(year, month, day) {
   return `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
 }
@@ -1595,20 +1637,8 @@ function openDayModal(key) {
   updateDefaultAlignLabel();
 
   // 색상 그리드 초기화
-  selectedEventColor = EVENT_COLORS[0];
-  const grid = document.getElementById('event-color-grid');
-  grid.innerHTML = '';
-  EVENT_COLORS.forEach((c, i) => {
-    const dot = document.createElement('div');
-    dot.className = 'color-dot' + (i === 0 ? ' selected' : '');
-    dot.style.background = c;
-    dot.onclick = () => {
-      grid.querySelectorAll('.color-dot').forEach(d => d.classList.remove('selected'));
-      dot.classList.add('selected');
-      selectedEventColor = c;
-    };
-    grid.appendChild(dot);
-  });
+  selectedEventColor = getEventColors()[0];
+  renderEventColorGrid(selectedEventColor);
 
   // 반복 요일 초기화
   document.querySelectorAll('#repeat-days-grid input[type="checkbox"]').forEach(cb => cb.checked = false);
@@ -1617,6 +1647,52 @@ function openDayModal(key) {
   renderDayEventsList(key);
 
   document.getElementById('day-modal-overlay').classList.add('active');
+}
+
+// 팔레트(기본 또는 커스텀) 기반 색상 그리드 렌더링
+function renderEventColorGrid(selected) {
+  const grid = document.getElementById('event-color-grid');
+  grid.innerHTML = '';
+  getEventColors().forEach(c => {
+    const dot = document.createElement('div');
+    dot.className = 'color-dot' + (c === selected ? ' selected' : '');
+    dot.style.background = c;
+    dot.dataset.color = c;
+    dot.onclick = () => {
+      selectedEventColor = c;
+      markEventGridSelection(c);
+      syncCustomColorInputs(c);
+    };
+    grid.appendChild(dot);
+  });
+  syncCustomColorInputs(selected);
+}
+
+function markEventGridSelection(color) {
+  document.querySelectorAll('#event-color-grid .color-dot').forEach(d => {
+    d.classList.toggle('selected', d.dataset.color === color);
+  });
+}
+
+function syncCustomColorInputs(c) {
+  const hex = normalizeHex(c);
+  if (!hex) return;
+  document.getElementById('event-custom-color').value = hex;
+  document.getElementById('event-custom-hex').value = hex;
+}
+
+function pickCustomEventColor(c) {
+  selectedEventColor = c;
+  document.getElementById('event-custom-hex').value = c;
+  markEventGridSelection(c);
+}
+
+function pickCustomEventHex(v) {
+  const hex = normalizeHex(v);
+  if (!hex) return;
+  selectedEventColor = hex;
+  document.getElementById('event-custom-color').value = hex;
+  markEventGridSelection(hex);
 }
 
 function renderDayEventsList(dayKey) {
@@ -1700,9 +1776,8 @@ function renderDayEventsList(dayKey) {
       document.getElementById('event-delete-btn').style.display = '';
       document.getElementById('event-bulk-color-btn').style.display = '';
       selectedEventColor = ev.color;
-      document.getElementById('event-color-grid').querySelectorAll('.color-dot').forEach((dot, i) => {
-        dot.classList.toggle('selected', EVENT_COLORS[i] === ev.color);
-      });
+      markEventGridSelection(ev.color);
+      syncCustomColorInputs(ev.color);
       document.querySelectorAll('input[name="ev-text-color"]').forEach(r => {
         r.checked = r.value === (ev.textColor === '#000000' ? 'black' : 'white');
       });
@@ -1831,9 +1906,8 @@ function openEventModal(id) {
   document.getElementById('event-end-input').value   = ev.endDate;
   document.getElementById('event-delete-btn').style.display = '';
   selectedEventColor = ev.color;
-  document.getElementById('event-color-grid').querySelectorAll('.color-dot').forEach((dot, i) => {
-    dot.classList.toggle('selected', EVENT_COLORS[i] === ev.color);
-  });
+  markEventGridSelection(ev.color);
+  syncCustomColorInputs(ev.color);
   document.querySelectorAll('input[name="ev-text-color"]').forEach(r => {
     r.checked = r.value === (ev.textColor === '#000000' ? 'black' : 'white');
   });
@@ -2060,6 +2134,11 @@ function openSettings(tab) {
   document.getElementById('s-border-width').value = state.borderWidth || 2;
   document.getElementById('border-width-label').textContent = state.borderWidth || 2;
 
+  // 색상 팔레트 초기값
+  paletteDraft = [...getEventColors()];
+  paletteSelIdx = -1;
+  renderPaletteEditor();
+
   selectBgType(currentBgType);
   selectTitleStyle(currentTitleStyleType);
   renderTitleGradientPresets();
@@ -2112,13 +2191,88 @@ function applyCalendarStyles() {
   container.style.setProperty('--border-w', bw + 'px');
 }
 
+// ===== 색상 팔레트 설정 =====
+let paletteDraft = [];
+let paletteSelIdx = -1;
+
+function renderPaletteEditor() {
+  const grid = document.getElementById('palette-edit-grid');
+  grid.innerHTML = '';
+  paletteDraft.forEach((c, i) => {
+    const dot = document.createElement('div');
+    dot.className = 'color-dot' + (i === paletteSelIdx ? ' selected' : '');
+    dot.style.background = c;
+    dot.onclick = () => { paletteSelIdx = i; renderPaletteEditor(); };
+    grid.appendChild(dot);
+  });
+  const editor = document.getElementById('palette-editor');
+  if (paletteSelIdx >= 0 && paletteSelIdx < paletteDraft.length) {
+    editor.style.display = 'block';
+    document.getElementById('palette-color-picker').value = paletteDraft[paletteSelIdx];
+    document.getElementById('palette-hex-input').value = paletteDraft[paletteSelIdx];
+  } else {
+    editor.style.display = 'none';
+  }
+}
+
+// 입력 중 재렌더링하면 포커스가 날아가므로 선택된 dot만 직접 갱신
+function paletteUpdateSelectedDot(hex) {
+  paletteDraft[paletteSelIdx] = hex;
+  const dots = document.querySelectorAll('#palette-edit-grid .color-dot');
+  if (dots[paletteSelIdx]) dots[paletteSelIdx].style.background = hex;
+}
+
+function paletteEditColor(c) {
+  if (paletteSelIdx < 0) return;
+  document.getElementById('palette-hex-input').value = c;
+  paletteUpdateSelectedDot(c);
+}
+
+function paletteEditHex(v) {
+  const hex = normalizeHex(v);
+  if (!hex || paletteSelIdx < 0) return;
+  document.getElementById('palette-color-picker').value = hex;
+  paletteUpdateSelectedDot(hex);
+}
+
+function paletteAddColor() {
+  paletteDraft.push('#4ade80');
+  paletteSelIdx = paletteDraft.length - 1;
+  renderPaletteEditor();
+}
+
+function paletteDeleteColor() {
+  if (paletteSelIdx < 0) return;
+  if (paletteDraft.length <= 1) { toast('색상은 최소 1개 필요합니다'); return; }
+  paletteDraft.splice(paletteSelIdx, 1);
+  paletteSelIdx = -1;
+  renderPaletteEditor();
+}
+
+function paletteReset() {
+  paletteDraft = [...EVENT_COLORS];
+  paletteSelIdx = -1;
+  renderPaletteEditor();
+}
+
+function savePaletteSettings() {
+  const isDefault = paletteDraft.length === EVENT_COLORS.length
+    && paletteDraft.every((c, i) => c === EVENT_COLORS[i]);
+  state.customEventColors = isDefault ? null : [...paletteDraft];
+  saveState();
+  closeSettings();
+  toast('색상 팔레트 적용됨');
+}
+
 function switchSettingsTab(tab) {
   document.getElementById('stab-btn-title').classList.toggle('active', tab === 'title');
   document.getElementById('stab-btn-background').classList.toggle('active', tab === 'background');
   document.getElementById('stab-btn-calendar').classList.toggle('active', tab === 'calendar');
+  document.getElementById('stab-btn-colors').classList.toggle('active', tab === 'colors');
   document.getElementById('stab-title').style.display = tab === 'title' ? 'block' : 'none';
   document.getElementById('stab-background').style.display = tab === 'background' ? 'block' : 'none';
   document.getElementById('stab-calendar').style.display = tab === 'calendar' ? 'block' : 'none';
+  document.getElementById('stab-colors').style.display = tab === 'colors' ? 'block' : 'none';
 }
 
 function selectBgType(type) {
