@@ -808,11 +808,12 @@ select.form-input { cursor: pointer; }
 
     <div class="form-group">
       <label class="form-label">빈 칸 제목 (라벨)</label>
-      <div style="display:flex; gap:6px">
-        <input type="text" class="form-input" id="pending-label-input" placeholder="예정 (미확정)" style="flex:1" oninput="updatePendingLabel(this.value)">
-        <button type="button" class="btn btn-danger" style="flex-shrink:0; padding:6px 12px; font-size:12px" onclick="clearPendingLabel()">라벨 삭제</button>
+      <input type="text" class="form-input" id="pending-label-input" placeholder="예정 (미확정)" oninput="updatePendingLabel(this.value)">
+      <div style="display:flex; gap:6px; margin-top:6px">
+        <button type="button" class="btn btn-secondary" id="pending-label-cell-btn" style="flex:1; padding:6px 10px; font-size:12px" onclick="toggleCellLabel()">이 칸 라벨 삭제</button>
+        <button type="button" class="btn btn-danger" style="flex:1; padding:6px 10px; font-size:12px" onclick="clearPendingLabel()">전체 라벨 삭제</button>
       </div>
-      <div style="font-size:11px; color:var(--text2); margin-top:4px">모든 빈 칸 상단에 표시되는 제목입니다. 삭제하면 표시되지 않습니다 (입력 즉시 반영)</div>
+      <div style="font-size:11px; color:var(--text2); margin-top:4px">"이 칸 라벨 삭제"는 지금 클릭한 칸에서만 숨깁니다 (다시 누르면 복원). "전체 라벨 삭제"는 모든 칸에서 숨기며, 다시 입력하면 복원됩니다</div>
     </div>
 
     <hr class="divider">
@@ -1188,8 +1189,9 @@ let state = {
   borderWidth: 2,
   defaultEventAlign: 'left',
   customEventColors: null,
-  pendingMemos: {},  // "YYYY-MM" → [{ id, text, color, textColor }] 미확정 예정 메모
-  pendingLabel: '예정 (미확정)'   // 빈 칸 존 라벨 (빈 문자열이면 표시 안 함)
+  pendingMemos: {},  // "YYYY-MM" → [{ id, text, color, textColor, slot }] 미확정 예정 메모
+  pendingLabel: '예정 (미확정)',  // 빈 칸 라벨 (빈 문자열이면 전체 표시 안 함)
+  pendingLabelHidden: {}          // "YYYY-MM" → [slot...] 라벨을 숨긴 칸 목록
 };
 
 let currentDayKey = null;
@@ -1631,9 +1633,11 @@ function makePendingCell(gi, col, cellMemos) {
   cellEl.style.gridRow = '1';
   if (col === 6) cellEl.style.borderRight = 'none';
 
-  // 모든 빈 칸에 라벨 표시 (일반 칸의 날짜 숫자 역할 → 예정 구역 표시 + 메모 높이 정렬)
-  const label = makePendingLabel();
-  if (label) cellEl.appendChild(label);
+  // 모든 빈 칸에 라벨 표시 (칸별로 숨긴 칸은 제외)
+  if (!getHiddenLabelSlots().includes(gi)) {
+    const label = makePendingLabel();
+    if (label) cellEl.appendChild(label);
+  }
 
   cellMemos.forEach(m => cellEl.appendChild(makePendingPill(m)));
 
@@ -2299,6 +2303,7 @@ function deleteCurrentEvent() {
 // ===== 예정(미확정) 일정 메모 =====
 let currentPendingId = null;
 let currentPendingSlot = null;   // 새 메모가 들어갈 빈 칸 번호 (월 그리드 기준)
+let currentLabelSlot = null;     // 라벨 칸별 삭제/복원 대상 칸 번호
 let selectedPendingColor = '#facc15';
 
 function monthKey(y, m) { return `${y}-${String(m).padStart(2,'0')}`; }
@@ -2316,6 +2321,10 @@ function openPendingModal(memoId, slot) {
   const memo = getMonthMemos(state.year, state.month).find(m => m.id === currentPendingId) || null;
   // 편집이면 기존 slot 유지(저장 시 spread로 보존), 새 메모면 클릭한 칸
   currentPendingSlot = memo ? null : (typeof slot === 'number' ? slot : null);
+  // 라벨 칸별 삭제 대상: 클릭한 칸 (메모 편집이면 그 메모의 칸)
+  currentLabelSlot = (typeof slot === 'number') ? slot
+    : (memo && typeof memo.slot === 'number' ? memo.slot : null);
+  updateCellLabelBtn();
 
   document.getElementById('pending-label-input').value =
     (state.pendingLabel !== undefined && state.pendingLabel !== null) ? state.pendingLabel : '예정 (미확정)';
@@ -2350,7 +2359,35 @@ function updatePendingLabel(v) {
 function clearPendingLabel() {
   document.getElementById('pending-label-input').value = '';
   updatePendingLabel('');
-  toast('라벨 삭제됨 — 다시 입력하면 표시됩니다');
+  toast('라벨 전체 삭제됨 — 다시 입력하면 표시됩니다');
+}
+
+// 현재 달에서 라벨을 숨긴 칸 목록
+function getHiddenLabelSlots() {
+  return (state.pendingLabelHidden && state.pendingLabelHidden[monthKey(state.year, state.month)]) || [];
+}
+
+// 클릭한 칸의 라벨만 삭제/복원 (달별 저장)
+function toggleCellLabel() {
+  if (currentLabelSlot === null) { toast('빈 칸을 클릭해서 연 상태에서만 가능합니다'); return; }
+  if (!state.pendingLabelHidden) state.pendingLabelHidden = {};
+  const k = monthKey(state.year, state.month);
+  const arr = state.pendingLabelHidden[k] || [];
+  const hidden = arr.includes(currentLabelSlot);
+  state.pendingLabelHidden[k] = hidden
+    ? arr.filter(s => s !== currentLabelSlot)
+    : [...arr, currentLabelSlot];
+  saveState();
+  renderBody();
+  updateCellLabelBtn();
+  toast(hidden ? '이 칸 라벨 복원됨' : '이 칸 라벨 삭제됨');
+}
+
+function updateCellLabelBtn() {
+  const btn = document.getElementById('pending-label-cell-btn');
+  if (!btn) return;
+  const hidden = currentLabelSlot !== null && getHiddenLabelSlots().includes(currentLabelSlot);
+  btn.textContent = hidden ? '이 칸 라벨 복원' : '이 칸 라벨 삭제';
 }
 
 function renderPendingList() {
