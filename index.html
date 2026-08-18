@@ -287,6 +287,8 @@ body {
 }
 .pending-cell:hover { background: rgba(250,204,21,0.06); }
 .pending-cell:hover .day-add-btn { display: flex; }
+.pending-cell.inert { cursor: default; }
+.pending-cell.inert:hover { background: transparent; }
 .pending-zone-label {
   height: 24px;
   display: flex;
@@ -1498,13 +1500,9 @@ function renderBody() {
   const memos = getMonthMemos(year, month);
   const tailCount = cells.length - fdow - dim;
   const hasEmptyCells = fdow > 0 || tailCount > 0;
-  // 메모가 표시될 칸(slot) 판정: slot 있으면 그 칸, zone만 있으면 해당 구간 첫 칸, 없으면 첫 빈 칸
-  const firstEmptySlot = fdow > 0 ? 0 : (tailCount > 0 ? fdow + dim : null);
-  const slotOfMemo = m => {
-    if (typeof m.slot === 'number' && m.slot >= 0 && m.slot < cells.length) return m.slot;
-    if (m.zone === 'tail' && tailCount > 0) return fdow + dim;
-    return firstEmptySlot;
-  };
+  // 예정 메모 칸은 달마다 딱 1개: 말일 바로 다음 칸, 없으면(말일=토요일) 1일 앞 칸
+  // 이 달의 모든 메모는 이 칸에 표시. 나머지 빈 칸은 비어 보이게.
+  const pendingSlot = tailCount > 0 ? fdow + dim : (fdow > 0 ? fdow - 1 : null);
 
   for (let w = 0; w < numWeeks; w++) {
     const wk = cells.slice(w*7, w*7+7);
@@ -1530,9 +1528,9 @@ function renderBody() {
       const cell = wk[idx];
 
       if (!cell.cur) {
-        // 빈 칸(이전/다음 달)은 칸별 예정 메모 칸으로 (흐릿한 구분선 유지)
+        // 빈 칸(이전/다음 달): 지정된 1칸만 예정 메모 칸, 나머지는 빈 칸
         const gi = w * 7 + idx;
-        weekGrid.appendChild(makePendingCell(gi, idx, memos.filter(m => slotOfMemo(m) === gi)));
+        weekGrid.appendChild(makePendingCell(gi, idx, gi === pendingSlot ? memos : null));
         continue;
       }
 
@@ -1625,15 +1623,17 @@ function renderBody() {
   }
 }
 
-// 예정(미확정) 메모 칸 생성 — gi: 월 그리드 전체 기준 칸 번호(slot), col: 주 내 컬럼
+// 예정(미확정) 메모 칸 생성 — gi: 월 그리드 전체 기준 칸 번호, col: 주 내 컬럼
+// cellMemos가 null이면 비활성 빈 칸 (내용/클릭 없음)
 function makePendingCell(gi, col, cellMemos) {
   const cellEl = document.createElement('div');
-  cellEl.className = 'pending-cell';
+  cellEl.className = 'pending-cell' + (cellMemos ? '' : ' inert');
   cellEl.style.gridColumn = col + 1;
   cellEl.style.gridRow = '1';
   if (col === 6) cellEl.style.borderRight = 'none';
 
-  // 모든 빈 칸에 라벨 표시 (칸별로 숨긴 칸은 제외)
+  if (!cellMemos) return cellEl;
+
   if (!getHiddenLabelSlots().includes(gi)) {
     const label = makePendingLabel();
     if (label) cellEl.appendChild(label);
