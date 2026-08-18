@@ -841,6 +841,18 @@ select.form-input { cursor: pointer; }
       </div>
     </div>
     <div class="form-group">
+      <label class="form-label">글자 정렬</label>
+      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <div class="radio-group">
+          <label><input type="radio" name="pending-align" value="left" checked> 왼쪽</label>
+          <label><input type="radio" name="pending-align" value="center"> 중앙</label>
+          <label><input type="radio" name="pending-align" value="right"> 오른쪽</label>
+        </div>
+        <button type="button" class="btn btn-secondary" style="padding:4px 10px; font-size:12px;" onclick="setDefaultPendingAlign()">기본값으로 지정</button>
+      </div>
+      <div style="font-size:11px; color:var(--text2); margin-top:4px">현재 선택한 정렬을 새 일정의 기본값으로 저장합니다 (현재 기본값: <span id="pending-default-align-label">왼쪽</span>)</div>
+    </div>
+    <div class="form-group">
       <label class="form-label">확정 날짜 (선택)</label>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px">
         <input type="date" class="form-input" id="pending-start-input">
@@ -1668,6 +1680,8 @@ function makePendingPill(m) {
   pill.className = 'pending-pill';
   pill.style.background = m.color;
   pill.style.color = m.textColor || '#000000';
+  pill.style.justifyContent = m.align === 'center' ? 'center' : (m.align === 'right' ? 'flex-end' : 'flex-start');
+  pill.style.textAlign = m.align || 'left';
   pill.textContent = m.text;
   pill.title = m.text;
   pill.onclick = e => { e.stopPropagation(); openPendingModal(m.id); };
@@ -2229,6 +2243,19 @@ function setDefaultEventAlign() {
   state.defaultEventAlign = align;
   saveState();
   updateDefaultAlignLabel();
+  updatePendingDefaultAlignLabel();
+  toast(`기본 정렬이 "${ALIGN_LABELS[align]}"(으)로 지정됨`);
+}
+function updatePendingDefaultAlignLabel() {
+  const el = document.getElementById('pending-default-align-label');
+  if (el) el.textContent = ALIGN_LABELS[state.defaultEventAlign || 'left'];
+}
+function setDefaultPendingAlign() {
+  const align = document.querySelector('input[name="pending-align"]:checked').value;
+  state.defaultEventAlign = align;
+  saveState();
+  updateDefaultAlignLabel();
+  updatePendingDefaultAlignLabel();
   toast(`기본 정렬이 "${ALIGN_LABELS[align]}"(으)로 지정됨`);
 }
 
@@ -2339,6 +2366,10 @@ function openPendingModal(memoId, slot) {
   const tc = memo && memo.textColor === '#ffffff' ? 'white' : 'black';
   document.querySelector(`input[name="pending-text-color"][value="${tc}"]`).checked = true;
 
+  const al = memo ? (memo.align || 'left') : (state.defaultEventAlign || 'left');
+  document.querySelector(`input[name="pending-align"][value="${al}"]`).checked = true;
+  updatePendingDefaultAlignLabel();
+
   renderPendingList();
   document.getElementById('pending-modal-overlay').classList.add('active');
 }
@@ -2395,15 +2426,62 @@ function renderPendingList() {
   list.innerHTML = '';
   const memos = getMonthMemos(state.year, state.month);
   if (!memos.length) return;
-  const title = document.createElement('div');
-  title.className = 'form-label';
-  title.textContent = `등록된 예정 ${memos.length}개 — 클릭해서 수정`;
-  list.appendChild(title);
-  memos.forEach(m => {
-    const row = makePendingPill(m);
-    row.style.marginBottom = '4px';
-    row.style.fontSize = '13px';
-    if (m.id === currentPendingId) row.style.outline = '2px solid var(--green)';
+
+  const header = document.createElement('div');
+  header.style.cssText = 'font-size:11px; color:var(--text2); margin-bottom:4px; font-weight:700;';
+  header.textContent = '등록된 예정 (순서 변경 가능)';
+  list.appendChild(header);
+
+  memos.forEach((m, i) => {
+    const row = document.createElement('div');
+    row.className = 'ev-order-item';
+    if (m.id === currentPendingId) row.style.outline = '1px solid var(--green)';
+
+    const colorDot = document.createElement('div');
+    colorDot.className = 'ev-order-color';
+    colorDot.style.background = m.color;
+
+    const text = document.createElement('div');
+    text.className = 'ev-order-text';
+    text.textContent = m.text;
+    text.style.color = m.textColor || '#fff';
+
+    const btns = document.createElement('div');
+    btns.className = 'ev-order-btns';
+
+    if (i > 0) {
+      const upBtn = document.createElement('button');
+      upBtn.className = 'ev-order-btn';
+      upBtn.textContent = '▲';
+      upBtn.onclick = (e) => {
+        e.stopPropagation();
+        [memos[i - 1], memos[i]] = [memos[i], memos[i - 1]];
+        saveState();
+        renderBody();
+        renderPendingList();
+      };
+      btns.appendChild(upBtn);
+    }
+
+    if (i < memos.length - 1) {
+      const dnBtn = document.createElement('button');
+      dnBtn.className = 'ev-order-btn';
+      dnBtn.textContent = '▼';
+      dnBtn.onclick = (e) => {
+        e.stopPropagation();
+        [memos[i], memos[i + 1]] = [memos[i + 1], memos[i]];
+        saveState();
+        renderBody();
+        renderPendingList();
+      };
+      btns.appendChild(dnBtn);
+    }
+
+    row.appendChild(colorDot);
+    row.appendChild(text);
+    row.appendChild(btns);
+
+    row.style.cursor = 'pointer';
     row.onclick = () => openPendingModal(m.id);
     list.appendChild(row);
   });
@@ -2459,6 +2537,7 @@ function savePendingMemo() {
   if (!text) { toast('내용을 입력해주세요'); return; }
   const tc = document.querySelector('input[name="pending-text-color"]:checked').value;
   const textColor = tc === 'white' ? '#ffffff' : '#000000';
+  const align = document.querySelector('input[name="pending-align"]:checked').value;
   let sd = document.getElementById('pending-start-input').value;
   let ed = document.getElementById('pending-end-input').value;
 
@@ -2469,8 +2548,7 @@ function savePendingMemo() {
     if (sd > ed) { toast('종료일이 시작일보다 빠릅니다'); return; }
     state.events.push({
       id: uid(), text, startDate: sd, endDate: ed,
-      color: selectedPendingColor, textColor,
-      align: state.defaultEventAlign || 'left'
+      color: selectedPendingColor, textColor, align
     });
     removePendingById(currentPendingId);
     saveState();
@@ -2487,10 +2565,10 @@ function savePendingMemo() {
 
   if (currentPendingId) {
     const idx = arr.findIndex(m => m.id === currentPendingId);
-    if (idx >= 0) arr[idx] = { ...arr[idx], text, color: selectedPendingColor, textColor };
+    if (idx >= 0) arr[idx] = { ...arr[idx], text, color: selectedPendingColor, textColor, align };
     toast('예정 일정 수정됨');
   } else {
-    arr.push({ id: uid(), text, color: selectedPendingColor, textColor, slot: currentPendingSlot });
+    arr.push({ id: uid(), text, color: selectedPendingColor, textColor, align, slot: currentPendingSlot });
     toast('예정 일정 추가됨');
   }
   saveState();
