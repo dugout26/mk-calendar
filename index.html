@@ -273,10 +273,11 @@ body {
 .day-cell-unified:hover .day-add-btn { display: flex; }
 
 /* ===== 예정(미확정) 메모 칸 — 이전/다음 달 빈 칸 활용 (칸별 개별 유지) ===== */
+/* 구분선은 원래 other-month처럼 흐릿하게 → 영역 자체로 확정 일정과 구분 */
 .pending-cell {
   position: relative;
   padding: 5px 6px 6px 6px;
-  border-right: var(--border-w, 2px) solid #1a2e20;
+  border-right: var(--border-w, 2px) solid rgba(26, 46, 32, 0.25);
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -1662,9 +1663,7 @@ function makePendingLabel() {
 function makePendingPill(m) {
   const pill = document.createElement('div');
   pill.className = 'pending-pill';
-  // 미확정 표시: 선택 색상 위에 대각선 빗금 → 확정 일정의 단색 바와 한눈에 구분
-  pill.style.background =
-    `repeating-linear-gradient(45deg, rgba(0,0,0,0.32) 0 6px, rgba(0,0,0,0) 6px 12px), ${m.color}`;
+  pill.style.background = m.color;
   pill.style.color = m.textColor || '#000000';
   pill.textContent = m.text;
   pill.title = m.text;
