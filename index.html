@@ -272,6 +272,63 @@ body {
 }
 .day-cell-unified:hover .day-add-btn { display: flex; }
 
+/* ===== 예정(미확정) 메모 존 — 이전/다음 달 빈 칸 활용 ===== */
+.pending-zone {
+  position: relative;
+  padding: 5px 6px 6px 6px;
+  border-right: var(--border-w, 2px) solid #1a2e20;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  cursor: pointer;
+  overflow: hidden;
+  transition: background 0.15s;
+}
+.pending-zone:hover { background: rgba(250,204,21,0.06); }
+.pending-zone:hover .day-add-btn { display: flex; }
+.pending-zone-label {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: var(--muted);
+  flex-shrink: 0;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.pending-pill {
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 3px;
+  padding: 0 7px;
+  font-size: var(--fs-event, 16px);
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.pending-pill:hover { opacity: 0.75; }
+
+/* 빈 칸이 하나도 없는 달 대비: 달력 하단 예정 스트립 */
+.pending-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  border-top: var(--border-w, 2px) solid #1a2e20;
+  cursor: pointer;
+}
+.pending-strip .pending-pill { max-width: 220px; }
+
 /* ===== MODALS ===== */
 .modal-overlay {
   display: none;
@@ -737,6 +794,61 @@ select.form-input { cursor: pointer; }
   </div>
 </div>
 
+<!-- ===== 예정(미확정) 일정 모달 ===== -->
+<div class="modal-overlay" id="pending-modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title-text" id="pending-modal-title">예정 일정 (미확정)</span>
+      <button class="modal-close" onclick="closePendingModal()">×</button>
+    </div>
+
+    <!-- 이 달의 등록된 예정 목록 -->
+    <div id="pending-list" style="margin-bottom:10px;"></div>
+
+    <div class="form-group">
+      <label class="form-label">빈 칸 제목 (라벨)</label>
+      <input type="text" class="form-input" id="pending-label-input" placeholder="예정 (미확정)" oninput="updatePendingLabel(this.value)">
+      <div style="font-size:11px; color:var(--text2); margin-top:4px">달력 빈 칸 상단에 표시되는 제목입니다. 비워두면 표시되지 않습니다 (입력 즉시 반영)</div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="form-group">
+      <label class="form-label">내용</label>
+      <input type="text" class="form-input" id="pending-text-input" placeholder="예: 멸망전 (일정 미정)">
+    </div>
+    <div class="form-group">
+      <label class="form-label">배경 색상</label>
+      <div class="color-grid" id="pending-color-grid"></div>
+      <div style="display:flex; gap:8px; align-items:center; margin-top:8px">
+        <span style="font-size:12px; color:var(--text2); flex-shrink:0">직접 입력</span>
+        <input type="color" id="pending-custom-color" value="#facc15" style="width:44px; flex-shrink:0" oninput="pickPendingCustomColor(this.value)">
+        <input type="text" class="form-input" id="pending-custom-hex" placeholder="#facc15" maxlength="7" spellcheck="false" style="flex:1; padding:6px 8px; font-size:12px" oninput="pickPendingCustomHex(this.value)">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">텍스트 색상</label>
+      <div class="radio-group">
+        <label><input type="radio" name="pending-text-color" value="black" checked> 검정</label>
+        <label><input type="radio" name="pending-text-color" value="white"> 흰색</label>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">확정 날짜 (선택)</label>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px">
+        <input type="date" class="form-input" id="pending-start-input">
+        <input type="date" class="form-input" id="pending-end-input">
+      </div>
+      <div style="font-size:11px; color:var(--text2); margin-top:4px">날짜를 지정하고 저장하면 <b>확정 일정</b>으로 달력에 등록되고 예정 목록에서 자동으로 빠집니다</div>
+    </div>
+    <div style="display:flex; gap:8px">
+      <button class="btn btn-primary" onclick="savePendingMemo()" style="flex:1">저장</button>
+      <button class="btn btn-danger" id="pending-delete-btn" onclick="deletePendingMemo()" style="display:none">삭제</button>
+      <button class="btn btn-secondary" onclick="closePendingModal()">닫기</button>
+    </div>
+  </div>
+</div>
+
 <!-- ===== SETTINGS MODAL ===== -->
 <div class="modal-overlay" id="settings-modal-overlay">
   <div class="modal modal-wide">
@@ -1071,7 +1183,9 @@ let state = {
   fontSize: 0,
   borderWidth: 2,
   defaultEventAlign: 'left',
-  customEventColors: null
+  customEventColors: null,
+  pendingMemos: {},  // "YYYY-MM" → [{ id, text, color, textColor }] 미확정 예정 메모
+  pendingLabel: '예정 (미확정)'   // 빈 칸 존 라벨 (빈 문자열이면 표시 안 함)
 };
 
 let currentDayKey = null;
@@ -1374,6 +1488,11 @@ function renderBody() {
   const numWeeks = cells.length / 7;
   body.style.gridTemplateRows = `repeat(${numWeeks}, minmax(0, 1fr))`;
 
+  // 예정(미확정) 메모 존: 이전/다음 달 빈 칸 중 넓은 쪽에 메모 표시 (같으면 앞쪽)
+  const memos = getMonthMemos(year, month);
+  const tailCount = cells.length - fdow - dim;
+  const activeZone = (fdow === 0 && tailCount === 0) ? null : (fdow >= tailCount ? 'lead' : 'tail');
+
   for (let w = 0; w < numWeeks; w++) {
     const wk = cells.slice(w*7, w*7+7);
 
@@ -1393,7 +1512,20 @@ function renderBody() {
     // → 캘린더 전체에서 이미지 시작 Y 일치 (주 단위가 아니라 전체 단위 통일)
 
     // ── Day cells (날짜번호 + 이벤트배너 공간 + 콘텐츠 통합) ──
-    wk.forEach((cell, idx) => {
+    // 이전/다음 달 칸은 날짜 대신 "예정(미확정) 메모" 존으로 사용
+    for (let idx = 0; idx < 7; idx++) {
+      const cell = wk[idx];
+
+      if (!cell.cur) {
+        // 연속된 빈 칸(이전/다음 달)을 하나의 존으로 합침
+        let j = idx;
+        while (j < 7 && !wk[j].cur) j++;
+        const kind = w === 0 ? 'lead' : 'tail';
+        weekGrid.appendChild(makePendingZone(idx, j - idx, kind, activeZone, memos));
+        idx = j - 1;
+        continue;
+      }
+
       const key  = dk(cell.y, cell.m, cell.d);
       const data = state.dayData[key] || { items: [] };
       const isToday = key === today;
@@ -1401,7 +1533,6 @@ function renderBody() {
 
       const dayCell = document.createElement('div');
       let cls = 'day-cell-unified';
-      if (!cell.cur) cls += ' other-month';
       if (isToday)   cls += ' today';
       if (idx === 0) cls += ' sun';
       if (idx === 6) cls += ' sat';
@@ -1462,7 +1593,7 @@ function renderBody() {
 
       dayCell.onclick = () => openDayModal(key);
       weekGrid.appendChild(dayCell);
-    });
+    }
 
     // ── Event bars (절대 위치로 그리드 위에 오버레이) ──
     barEls.forEach(bar => weekGrid.appendChild(bar));
@@ -1470,6 +1601,67 @@ function renderBody() {
     weekDiv.appendChild(weekGrid);
     body.appendChild(weekDiv);
   }
+
+  // 빈 칸이 하나도 없는 달: 달력 하단에 예정 스트립 표시
+  if (activeZone === null) {
+    body.style.gridTemplateRows = `repeat(${numWeeks}, minmax(0, 1fr)) auto`;
+    const strip = document.createElement('div');
+    strip.className = 'pending-strip';
+    const stripLabel = makePendingLabel();
+    if (stripLabel) strip.appendChild(stripLabel);
+    memos.forEach(m => strip.appendChild(makePendingPill(m)));
+    strip.onclick = () => openPendingModal(null);
+    body.appendChild(strip);
+  }
+}
+
+// 예정(미확정) 메모 존 생성 — startCol부터 span칸을 하나의 존으로
+function makePendingZone(startCol, span, kind, activeZone, memos) {
+  const zone = document.createElement('div');
+  zone.className = 'pending-zone';
+  zone.style.gridColumn = `${startCol + 1} / span ${span}`;
+  zone.style.gridRow = '1';
+  if (startCol + span >= 7) zone.style.borderRight = 'none';
+
+  const label = makePendingLabel();
+  if (label) zone.appendChild(label);
+
+  // 메모는 활성 존(넓은 쪽)에만 표시
+  if (kind === activeZone) {
+    memos.forEach(m => zone.appendChild(makePendingPill(m)));
+  }
+
+  const addBtn = document.createElement('button');
+  addBtn.className = 'day-add-btn';
+  addBtn.textContent = '+';
+  addBtn.title = '예정 일정 추가/편집';
+  addBtn.onclick = e => { e.stopPropagation(); openPendingModal(null); };
+  zone.appendChild(addBtn);
+
+  zone.onclick = () => openPendingModal(null);
+  return zone;
+}
+
+// 존/스트립 라벨 — 텍스트는 state.pendingLabel, 비어 있으면 표시 안 함
+function makePendingLabel() {
+  const text = (state.pendingLabel !== undefined && state.pendingLabel !== null)
+    ? state.pendingLabel : '예정 (미확정)';
+  if (!text.trim()) return null;
+  const label = document.createElement('div');
+  label.className = 'pending-zone-label';
+  label.textContent = text;
+  return label;
+}
+
+function makePendingPill(m) {
+  const pill = document.createElement('div');
+  pill.className = 'pending-pill';
+  pill.style.background = m.color;
+  pill.style.color = m.textColor || '#000000';
+  pill.textContent = m.text;
+  pill.title = m.text;
+  pill.onclick = e => { e.stopPropagation(); openPendingModal(m.id); };
+  return pill;
 }
 
 function buildEventBars(wk) {
@@ -1483,6 +1675,12 @@ function buildEventBars(wk) {
 
   const MAX_VISIBLE_ROWS = state.maxEventRows || 3;
 
+  // 현재 달 칸 범위 (이전/다음 달 칸은 예정 존이므로 바를 그리지 않음)
+  let minCur = 7, maxCur = -1;
+  wk.forEach((cell, i) => {
+    if (cell.cur) { if (i < minCur) minCur = i; if (i > maxCur) maxCur = i; }
+  });
+
   // Compute col positions
   const withCols = hits.map(ev => {
     const cs = ev.startDate > wStart ? ev.startDate : wStart;
@@ -1493,8 +1691,13 @@ function buildEventBars(wk) {
       if (k === cs) sc = i;
       if (k === ce) ec = i;
     });
+    // 현재 달 범위로 클램핑 — 전부 빈 칸 구간이면 이 주에서는 표시 안 함
+    sc = Math.max(sc, minCur);
+    ec = Math.min(ec, maxCur);
+    if (sc > ec) return null;
     return { ...ev, sc, ec };
-  });
+  }).filter(Boolean);
+  if (!withCols.length) return { barEls: [], colRows, colHasEvent };
 
   // startDate 기준 정렬 → 같으면 넓은것(endDate 늦은것) 우선
   withCols.sort((a, b) => a.startDate.localeCompare(b.startDate) || b.endDate.localeCompare(a.endDate));
@@ -2084,6 +2287,179 @@ function deleteCurrentEvent() {
   saveState();
   renderBody();
   closeDayModal();
+}
+
+// ===== SETTINGS =====
+// ===== 예정(미확정) 일정 메모 =====
+let currentPendingId = null;
+let selectedPendingColor = '#facc15';
+
+function monthKey(y, m) { return `${y}-${String(m).padStart(2,'0')}`; }
+
+function getMonthMemos(y, m) {
+  return (state.pendingMemos && state.pendingMemos[monthKey(y, m)]) || [];
+}
+
+function openPendingModal(memoId) {
+  currentPendingId = memoId || null;
+  const MONTHS = ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
+  document.getElementById('pending-modal-title').textContent =
+    `${state.year}년 ${MONTHS[state.month-1]} 예정 일정 (미확정)`;
+
+  const memo = getMonthMemos(state.year, state.month).find(m => m.id === currentPendingId) || null;
+
+  document.getElementById('pending-label-input').value =
+    (state.pendingLabel !== undefined && state.pendingLabel !== null) ? state.pendingLabel : '예정 (미확정)';
+  document.getElementById('pending-text-input').value = memo ? memo.text : '';
+  document.getElementById('pending-start-input').value = '';
+  document.getElementById('pending-end-input').value = '';
+  document.getElementById('pending-delete-btn').style.display = memo ? '' : 'none';
+
+  selectedPendingColor = memo ? memo.color : '#facc15';
+  renderPendingColorGrid(selectedPendingColor);
+
+  const tc = memo && memo.textColor === '#ffffff' ? 'white' : 'black';
+  document.querySelector(`input[name="pending-text-color"][value="${tc}"]`).checked = true;
+
+  renderPendingList();
+  document.getElementById('pending-modal-overlay').classList.add('active');
+}
+
+function closePendingModal() {
+  document.getElementById('pending-modal-overlay').classList.remove('active');
+  currentPendingId = null;
+}
+
+// 라벨 입력 즉시 반영 (빈 문자열 = 라벨 삭제)
+function updatePendingLabel(v) {
+  state.pendingLabel = v;
+  saveState();
+  renderBody();
+}
+
+function renderPendingList() {
+  const list = document.getElementById('pending-list');
+  list.innerHTML = '';
+  const memos = getMonthMemos(state.year, state.month);
+  if (!memos.length) return;
+  const title = document.createElement('div');
+  title.className = 'form-label';
+  title.textContent = `등록된 예정 ${memos.length}개 — 클릭해서 수정`;
+  list.appendChild(title);
+  memos.forEach(m => {
+    const row = makePendingPill(m);
+    row.style.marginBottom = '4px';
+    row.style.fontSize = '13px';
+    if (m.id === currentPendingId) row.style.outline = '2px solid var(--green)';
+    row.onclick = () => openPendingModal(m.id);
+    list.appendChild(row);
+  });
+}
+
+function renderPendingColorGrid(selected) {
+  const grid = document.getElementById('pending-color-grid');
+  grid.innerHTML = '';
+  getEventColors().forEach(c => {
+    const dot = document.createElement('div');
+    dot.className = 'color-dot' + (c === selected ? ' selected' : '');
+    dot.style.background = c;
+    dot.dataset.color = c;
+    dot.onclick = () => {
+      selectedPendingColor = c;
+      markPendingGridSelection(c);
+      syncPendingColorInputs(c);
+    };
+    grid.appendChild(dot);
+  });
+  syncPendingColorInputs(selected);
+}
+
+function markPendingGridSelection(color) {
+  document.querySelectorAll('#pending-color-grid .color-dot').forEach(d => {
+    d.classList.toggle('selected', d.dataset.color === color);
+  });
+}
+
+function syncPendingColorInputs(c) {
+  const hex = normalizeHex(c);
+  if (!hex) return;
+  document.getElementById('pending-custom-color').value = hex;
+  document.getElementById('pending-custom-hex').value = hex;
+}
+
+function pickPendingCustomColor(c) {
+  selectedPendingColor = c;
+  document.getElementById('pending-custom-hex').value = c;
+  markPendingGridSelection(c);
+}
+
+function pickPendingCustomHex(v) {
+  const hex = normalizeHex(v);
+  if (!hex) return;
+  selectedPendingColor = hex;
+  document.getElementById('pending-custom-color').value = hex;
+  markPendingGridSelection(hex);
+}
+
+function savePendingMemo() {
+  const text = document.getElementById('pending-text-input').value.trim();
+  if (!text) { toast('내용을 입력해주세요'); return; }
+  const tc = document.querySelector('input[name="pending-text-color"]:checked').value;
+  const textColor = tc === 'white' ? '#ffffff' : '#000000';
+  let sd = document.getElementById('pending-start-input').value;
+  let ed = document.getElementById('pending-end-input').value;
+
+  // 날짜가 지정되면 확정 일정으로 자동 전환
+  if (sd || ed) {
+    if (!sd) sd = ed;
+    if (!ed) ed = sd;
+    if (sd > ed) { toast('종료일이 시작일보다 빠릅니다'); return; }
+    state.events.push({
+      id: uid(), text, startDate: sd, endDate: ed,
+      color: selectedPendingColor, textColor,
+      align: state.defaultEventAlign || 'left'
+    });
+    removePendingById(currentPendingId);
+    saveState();
+    renderBody();
+    closePendingModal();
+    toast('확정 일정으로 등록됨');
+    return;
+  }
+
+  if (!state.pendingMemos) state.pendingMemos = {};
+  const k = monthKey(state.year, state.month);
+  if (!Array.isArray(state.pendingMemos[k])) state.pendingMemos[k] = [];
+  const arr = state.pendingMemos[k];
+
+  if (currentPendingId) {
+    const idx = arr.findIndex(m => m.id === currentPendingId);
+    if (idx >= 0) arr[idx] = { ...arr[idx], text, color: selectedPendingColor, textColor };
+    toast('예정 일정 수정됨');
+  } else {
+    arr.push({ id: uid(), text, color: selectedPendingColor, textColor });
+    toast('예정 일정 추가됨');
+  }
+  saveState();
+  renderBody();
+  closePendingModal();
+}
+
+function removePendingById(id) {
+  if (!id || !state.pendingMemos) return;
+  const arr = state.pendingMemos[monthKey(state.year, state.month)];
+  if (!Array.isArray(arr)) return;
+  const idx = arr.findIndex(m => m.id === id);
+  if (idx >= 0) arr.splice(idx, 1);
+}
+
+function deletePendingMemo() {
+  if (!currentPendingId) return;
+  removePendingById(currentPendingId);
+  saveState();
+  renderBody();
+  closePendingModal();
+  toast('예정 일정 삭제됨');
 }
 
 // ===== SETTINGS =====
@@ -2793,6 +3169,9 @@ document.getElementById('lck-modal-overlay').onclick = function(e) {
 document.getElementById('day-modal-overlay').onclick = function(e) {
   if (e.target === this) { saveDayData(); closeDayModal(); }
 };
+document.getElementById('pending-modal-overlay').onclick = function(e) {
+  if (e.target === this) closePendingModal();
+};
 document.getElementById('settings-modal-overlay').onclick = function(e) {
   if (e.target === this) { applyBackground(); applyTitle(); closeSettings(); }
 };
@@ -2800,7 +3179,9 @@ document.getElementById('settings-modal-overlay').onclick = function(e) {
 // ===== KEYBOARD =====
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
-    if (document.getElementById('day-modal-overlay').classList.contains('active')) {
+    if (document.getElementById('pending-modal-overlay').classList.contains('active')) {
+      closePendingModal();
+    } else if (document.getElementById('day-modal-overlay').classList.contains('active')) {
       saveDayData(); closeDayModal();
     } else if (document.getElementById('settings-modal-overlay').classList.contains('active')) {
       applyBackground(); applyTitle(); closeSettings();
