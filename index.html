@@ -808,8 +808,11 @@ select.form-input { cursor: pointer; }
 
     <div class="form-group">
       <label class="form-label">빈 칸 제목 (라벨)</label>
-      <input type="text" class="form-input" id="pending-label-input" placeholder="예정 (미확정)" oninput="updatePendingLabel(this.value)">
-      <div style="font-size:11px; color:var(--text2); margin-top:4px">달력 빈 칸 상단에 표시되는 제목입니다. 비워두면 표시되지 않습니다 (입력 즉시 반영)</div>
+      <div style="display:flex; gap:6px">
+        <input type="text" class="form-input" id="pending-label-input" placeholder="예정 (미확정)" style="flex:1" oninput="updatePendingLabel(this.value)">
+        <button type="button" class="btn btn-danger" style="flex-shrink:0; padding:6px 12px; font-size:12px" onclick="clearPendingLabel()">라벨 삭제</button>
+      </div>
+      <div style="font-size:11px; color:var(--text2); margin-top:4px">모든 빈 칸 상단에 표시되는 제목입니다. 삭제하면 표시되지 않습니다 (입력 즉시 반영)</div>
     </div>
 
     <hr class="divider">
@@ -1495,10 +1498,6 @@ function renderBody() {
   const hasEmptyCells = fdow > 0 || tailCount > 0;
   // slot 미지정(구버전) 메모가 표시될 기본 칸 = 첫 번째 빈 칸
   const firstEmptySlot = fdow > 0 ? 0 : (tailCount > 0 ? fdow + dim : null);
-  // 라벨은 각 빈 칸 구간의 첫 칸에만 표시
-  const labelSlots = new Set();
-  if (fdow > 0) labelSlots.add(0);
-  if (tailCount > 0) labelSlots.add(fdow + dim);
 
   for (let w = 0; w < numWeeks; w++) {
     const wk = cells.slice(w*7, w*7+7);
@@ -1526,7 +1525,7 @@ function renderBody() {
       if (!cell.cur) {
         // 빈 칸(이전/다음 달)은 칸별 예정 메모 칸으로
         const gi = w * 7 + idx;
-        weekGrid.appendChild(makePendingCell(gi, idx, labelSlots.has(gi), memos, firstEmptySlot));
+        weekGrid.appendChild(makePendingCell(gi, idx, memos, firstEmptySlot));
         continue;
       }
 
@@ -1620,17 +1619,16 @@ function renderBody() {
 }
 
 // 예정(미확정) 메모 칸 생성 — gi: 월 그리드 전체 기준 칸 번호(slot), col: 주 내 컬럼
-function makePendingCell(gi, col, showLabel, memos, firstEmptySlot) {
+function makePendingCell(gi, col, memos, firstEmptySlot) {
   const cellEl = document.createElement('div');
   cellEl.className = 'pending-cell';
   cellEl.style.gridColumn = col + 1;
   cellEl.style.gridRow = '1';
   if (col === 6) cellEl.style.borderRight = 'none';
 
-  if (showLabel) {
-    const label = makePendingLabel();
-    if (label) cellEl.appendChild(label);
-  }
+  // 모든 빈 칸에 라벨 표시 (일반 칸의 날짜 숫자 역할 → 예정 구역임을 표시 + 메모 높이 정렬)
+  const label = makePendingLabel();
+  if (label) cellEl.appendChild(label);
 
   // 이 칸(slot)에 배치된 메모 표시 (slot 없는 구버전 메모는 첫 빈 칸에)
   memos.forEach(m => {
@@ -2348,6 +2346,12 @@ function updatePendingLabel(v) {
   state.pendingLabel = v;
   saveState();
   renderBody();
+}
+
+function clearPendingLabel() {
+  document.getElementById('pending-label-input').value = '';
+  updatePendingLabel('');
+  toast('라벨 삭제됨 — 다시 입력하면 표시됩니다');
 }
 
 function renderPendingList() {
