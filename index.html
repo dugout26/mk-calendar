@@ -272,8 +272,8 @@ body {
 }
 .day-cell-unified:hover .day-add-btn { display: flex; }
 
-/* ===== 예정(미확정) 메모 칸 — 이전/다음 달 빈 칸 활용 (칸별 개별 유지) ===== */
-/* 구분선은 원래 other-month처럼 흐릿하게 → 영역 자체로 확정 일정과 구분 */
+/* ===== 예정(미확정) 메모 존 — 이전/다음 달 빈 칸을 하나로 합쳐 사용 ===== */
+/* 존 경계선은 원래 other-month처럼 흐릿하게 → 영역 자체로 확정 일정과 구분 */
 .pending-cell {
   position: relative;
   padding: 5px 6px 6px 6px;
@@ -1496,8 +1496,8 @@ function renderBody() {
   const memos = getMonthMemos(year, month);
   const tailCount = cells.length - fdow - dim;
   const hasEmptyCells = fdow > 0 || tailCount > 0;
-  // slot 미지정(구버전) 메모가 표시될 기본 칸 = 첫 번째 빈 칸
-  const firstEmptySlot = fdow > 0 ? 0 : (tailCount > 0 ? fdow + dim : null);
+  // 메모가 표시될 존: 앞/뒤 빈 칸 구간 중 넓은 쪽 (같으면 앞쪽)
+  const activeZone = fdow >= tailCount ? 'lead' : 'tail';
 
   for (let w = 0; w < numWeeks; w++) {
     const wk = cells.slice(w*7, w*7+7);
@@ -1523,9 +1523,12 @@ function renderBody() {
       const cell = wk[idx];
 
       if (!cell.cur) {
-        // 빈 칸(이전/다음 달)은 칸별 예정 메모 칸으로
-        const gi = w * 7 + idx;
-        weekGrid.appendChild(makePendingCell(gi, idx, memos, firstEmptySlot));
+        // 연속된 빈 칸(이전/다음 달)을 하나로 합쳐 예정 존으로 (내부 구분선 없음)
+        let j = idx;
+        while (j < 7 && !wk[j].cur) j++;
+        const kind = w === 0 ? 'lead' : 'tail';
+        weekGrid.appendChild(makePendingZone(idx, j - idx, kind, activeZone, memos));
+        idx = j - 1;
         continue;
       }
 
@@ -1618,33 +1621,31 @@ function renderBody() {
   }
 }
 
-// 예정(미확정) 메모 칸 생성 — gi: 월 그리드 전체 기준 칸 번호(slot), col: 주 내 컬럼
-function makePendingCell(gi, col, memos, firstEmptySlot) {
-  const cellEl = document.createElement('div');
-  cellEl.className = 'pending-cell';
-  cellEl.style.gridColumn = col + 1;
-  cellEl.style.gridRow = '1';
-  if (col === 6) cellEl.style.borderRight = 'none';
+// 예정(미확정) 존 생성 — 연속된 빈 칸(startCol부터 span칸)을 하나로 합침
+function makePendingZone(startCol, span, kind, activeZone, memos) {
+  const zone = document.createElement('div');
+  zone.className = 'pending-cell';
+  zone.style.gridColumn = `${startCol + 1} / span ${span}`;
+  zone.style.gridRow = '1';
+  if (startCol + span >= 7) zone.style.borderRight = 'none';
 
-  // 모든 빈 칸에 라벨 표시 (일반 칸의 날짜 숫자 역할 → 예정 구역임을 표시 + 메모 높이 정렬)
   const label = makePendingLabel();
-  if (label) cellEl.appendChild(label);
+  if (label) zone.appendChild(label);
 
-  // 이 칸(slot)에 배치된 메모 표시 (slot 없는 구버전 메모는 첫 빈 칸에)
-  memos.forEach(m => {
-    const slot = (m.slot === undefined || m.slot === null) ? firstEmptySlot : m.slot;
-    if (slot === gi) cellEl.appendChild(makePendingPill(m));
-  });
+  // 메모는 넓은 쪽 존에 모아서 표시 (slot 무관하게 이 달 메모 전체)
+  if (kind === activeZone) {
+    memos.forEach(m => zone.appendChild(makePendingPill(m)));
+  }
 
   const addBtn = document.createElement('button');
   addBtn.className = 'day-add-btn';
   addBtn.textContent = '+';
   addBtn.title = '예정 일정 추가/편집';
-  addBtn.onclick = e => { e.stopPropagation(); openPendingModal(null, gi); };
-  cellEl.appendChild(addBtn);
+  addBtn.onclick = e => { e.stopPropagation(); openPendingModal(null, null); };
+  zone.appendChild(addBtn);
 
-  cellEl.onclick = () => openPendingModal(null, gi);
-  return cellEl;
+  zone.onclick = () => openPendingModal(null, null);
+  return zone;
 }
 
 // 존/스트립 라벨 — 텍스트는 state.pendingLabel, 비어 있으면 표시 안 함
