@@ -1662,7 +1662,9 @@ function makePendingLabel() {
 function makePendingPill(m) {
   const pill = document.createElement('div');
   pill.className = 'pending-pill';
-  pill.style.background = m.color;
+  // 미확정 표시: 선택 색상 위에 대각선 빗금 → 확정 일정의 단색 바와 한눈에 구분
+  pill.style.background =
+    `repeating-linear-gradient(45deg, rgba(0,0,0,0.32) 0 6px, rgba(0,0,0,0) 6px 12px), ${m.color}`;
   pill.style.color = m.textColor || '#000000';
   pill.textContent = m.text;
   pill.title = m.text;
