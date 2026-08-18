@@ -272,8 +272,8 @@ body {
 }
 .day-cell-unified:hover .day-add-btn { display: flex; }
 
-/* ===== 예정(미확정) 메모 존 — 이전/다음 달 빈 칸을 하나로 합쳐 사용 ===== */
-/* 존 경계선은 원래 other-month처럼 흐릿하게 → 영역 자체로 확정 일정과 구분 */
+/* ===== 예정(미확정) 메모 칸 — 이전/다음 달 빈 칸 활용 (칸별 개별 유지) ===== */
+/* 구분선은 원래 other-month처럼 흐릿하게 → 영역 자체로 확정 일정과 구분 */
 .pending-cell {
   position: relative;
   padding: 5px 6px 6px 6px;
@@ -1496,17 +1496,12 @@ function renderBody() {
   const memos = getMonthMemos(year, month);
   const tailCount = cells.length - fdow - dim;
   const hasEmptyCells = fdow > 0 || tailCount > 0;
-  // 메모가 속한 존 판정: 위(1일 이전)='lead', 아래(말일 이후)='tail'
-  // 구버전 slot 메모는 위치로 추론, 정보 없으면 위쪽. 해당 존이 없는 달이면 있는 쪽으로.
-  const zoneOfMemo = m => {
-    let z = m.zone;
-    if (z !== 'lead' && z !== 'tail') {
-      if (typeof m.slot === 'number') z = m.slot < fdow ? 'lead' : 'tail';
-      else z = 'lead';
-    }
-    if (z === 'lead' && fdow === 0) z = 'tail';
-    if (z === 'tail' && tailCount === 0) z = 'lead';
-    return z;
+  // 메모가 표시될 칸(slot) 판정: slot 있으면 그 칸, zone만 있으면 해당 구간 첫 칸, 없으면 첫 빈 칸
+  const firstEmptySlot = fdow > 0 ? 0 : (tailCount > 0 ? fdow + dim : null);
+  const slotOfMemo = m => {
+    if (typeof m.slot === 'number' && m.slot >= 0 && m.slot < cells.length) return m.slot;
+    if (m.zone === 'tail' && tailCount > 0) return fdow + dim;
+    return firstEmptySlot;
   };
 
   for (let w = 0; w < numWeeks; w++) {
@@ -1533,12 +1528,9 @@ function renderBody() {
       const cell = wk[idx];
 
       if (!cell.cur) {
-        // 연속된 빈 칸(이전/다음 달)을 하나로 합쳐 예정 존으로 (내부 구분선 없음)
-        let j = idx;
-        while (j < 7 && !wk[j].cur) j++;
-        const kind = w === 0 ? 'lead' : 'tail';
-        weekGrid.appendChild(makePendingZone(idx, j - idx, kind, memos.filter(m => zoneOfMemo(m) === kind)));
-        idx = j - 1;
+        // 빈 칸(이전/다음 달)은 칸별 예정 메모 칸으로 (흐릿한 구분선 유지)
+        const gi = w * 7 + idx;
+        weekGrid.appendChild(makePendingCell(gi, idx, memos.filter(m => slotOfMemo(m) === gi)));
         continue;
       }
 
@@ -1631,29 +1623,29 @@ function renderBody() {
   }
 }
 
-// 예정(미확정) 존 생성 — 연속된 빈 칸(startCol부터 span칸)을 하나로 합침
-// kind: 'lead'(1일 이전) | 'tail'(말일 이후), zoneMemos: 이 존에 속한 메모들
-function makePendingZone(startCol, span, kind, zoneMemos) {
-  const zone = document.createElement('div');
-  zone.className = 'pending-cell';
-  zone.style.gridColumn = `${startCol + 1} / span ${span}`;
-  zone.style.gridRow = '1';
-  if (startCol + span >= 7) zone.style.borderRight = 'none';
+// 예정(미확정) 메모 칸 생성 — gi: 월 그리드 전체 기준 칸 번호(slot), col: 주 내 컬럼
+function makePendingCell(gi, col, cellMemos) {
+  const cellEl = document.createElement('div');
+  cellEl.className = 'pending-cell';
+  cellEl.style.gridColumn = col + 1;
+  cellEl.style.gridRow = '1';
+  if (col === 6) cellEl.style.borderRight = 'none';
 
+  // 모든 빈 칸에 라벨 표시 (일반 칸의 날짜 숫자 역할 → 예정 구역 표시 + 메모 높이 정렬)
   const label = makePendingLabel();
-  if (label) zone.appendChild(label);
+  if (label) cellEl.appendChild(label);
 
-  zoneMemos.forEach(m => zone.appendChild(makePendingPill(m)));
+  cellMemos.forEach(m => cellEl.appendChild(makePendingPill(m)));
 
   const addBtn = document.createElement('button');
   addBtn.className = 'day-add-btn';
   addBtn.textContent = '+';
   addBtn.title = '예정 일정 추가/편집';
-  addBtn.onclick = e => { e.stopPropagation(); openPendingModal(null, kind); };
-  zone.appendChild(addBtn);
+  addBtn.onclick = e => { e.stopPropagation(); openPendingModal(null, gi); };
+  cellEl.appendChild(addBtn);
 
-  zone.onclick = () => openPendingModal(null, kind);
-  return zone;
+  cellEl.onclick = () => openPendingModal(null, gi);
+  return cellEl;
 }
 
 // 존/스트립 라벨 — 텍스트는 state.pendingLabel, 비어 있으면 표시 안 함
@@ -2306,7 +2298,7 @@ function deleteCurrentEvent() {
 // ===== SETTINGS =====
 // ===== 예정(미확정) 일정 메모 =====
 let currentPendingId = null;
-let currentPendingZone = null;   // 새 메모가 들어갈 존: 'lead'(위) | 'tail'(아래)
+let currentPendingSlot = null;   // 새 메모가 들어갈 빈 칸 번호 (월 그리드 기준)
 let selectedPendingColor = '#facc15';
 
 function monthKey(y, m) { return `${y}-${String(m).padStart(2,'0')}`; }
@@ -2315,15 +2307,15 @@ function getMonthMemos(y, m) {
   return (state.pendingMemos && state.pendingMemos[monthKey(y, m)]) || [];
 }
 
-function openPendingModal(memoId, zone) {
+function openPendingModal(memoId, slot) {
   currentPendingId = memoId || null;
   const MONTHS = ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
   document.getElementById('pending-modal-title').textContent =
     `${state.year}년 ${MONTHS[state.month-1]} 예정 일정 (미확정)`;
 
   const memo = getMonthMemos(state.year, state.month).find(m => m.id === currentPendingId) || null;
-  // 편집이면 기존 zone 유지(저장 시 spread로 보존), 새 메모면 클릭한 존
-  currentPendingZone = memo ? null : (zone === 'lead' || zone === 'tail' ? zone : null);
+  // 편집이면 기존 slot 유지(저장 시 spread로 보존), 새 메모면 클릭한 칸
+  currentPendingSlot = memo ? null : (typeof slot === 'number' ? slot : null);
 
   document.getElementById('pending-label-input').value =
     (state.pendingLabel !== undefined && state.pendingLabel !== null) ? state.pendingLabel : '예정 (미확정)';
@@ -2345,7 +2337,7 @@ function openPendingModal(memoId, zone) {
 function closePendingModal() {
   document.getElementById('pending-modal-overlay').classList.remove('active');
   currentPendingId = null;
-  currentPendingZone = null;
+  currentPendingSlot = null;
 }
 
 // 라벨 입력 즉시 반영 (빈 문자열 = 라벨 삭제)
@@ -2461,7 +2453,7 @@ function savePendingMemo() {
     if (idx >= 0) arr[idx] = { ...arr[idx], text, color: selectedPendingColor, textColor };
     toast('예정 일정 수정됨');
   } else {
-    arr.push({ id: uid(), text, color: selectedPendingColor, textColor, zone: currentPendingZone || 'lead' });
+    arr.push({ id: uid(), text, color: selectedPendingColor, textColor, slot: currentPendingSlot });
     toast('예정 일정 추가됨');
   }
   saveState();
