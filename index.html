@@ -175,6 +175,14 @@ body {
 }
 .event-bar:hover { opacity: 0.75; }
 .event-bar-more { border: 1px dashed var(--muted); }
+/* 여러 줄 일정 — 높이는 줄 수만큼 인라인으로 지정 */
+.event-bar.multiline {
+  white-space: pre-line;
+  text-overflow: clip;
+  line-height: 1.25;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
 
 /* Unified day cell (날짜번호 + 이벤트공간 + 콘텐츠 통합) */
 .day-cell-unified {
@@ -319,6 +327,15 @@ body {
   transition: opacity 0.15s;
 }
 .pending-pill:hover { opacity: 0.75; }
+.pending-pill.multiline {
+  white-space: pre-line;
+  height: auto;
+  min-height: 20px;
+  line-height: 1.25;
+  padding-top: 3px;
+  padding-bottom: 3px;
+  text-overflow: clip;
+}
 
 /* 빈 칸이 하나도 없는 달 대비: 달력 하단 예정 스트립 */
 .pending-strip {
@@ -720,7 +737,8 @@ select.form-input { cursor: pointer; }
     <!-- 일정 (이벤트 배너) 추가 -->
     <div class="form-group">
       <label class="form-label">일정 이름</label>
-      <input type="text" class="form-input" id="event-text-input" placeholder="예: 멸망전 합숙">
+      <textarea class="form-input" id="event-text-input" rows="1" placeholder="예: 멸망전 합숙" style="min-height:0; resize:vertical" oninput="autoGrowTextarea(this)" onkeydown="handleEventTextKeydown(event)"></textarea>
+      <div style="font-size:11px; color:var(--text2); margin-top:4px">Shift+Enter로 줄바꿈하면 한 칸에 여러 줄로 묶여 표시됩니다 (최대 5줄) · Enter는 저장</div>
     </div>
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px" class="form-group">
       <div>
@@ -822,7 +840,8 @@ select.form-input { cursor: pointer; }
 
     <div class="form-group">
       <label class="form-label">내용</label>
-      <input type="text" class="form-input" id="pending-text-input" placeholder="예: 멸망전 (일정 미정)">
+      <textarea class="form-input" id="pending-text-input" rows="1" placeholder="예: 멸망전 (일정 미정)" style="min-height:0; resize:vertical" oninput="autoGrowTextarea(this)" onkeydown="handlePendingTextKeydown(event)"></textarea>
+      <div style="font-size:11px; color:var(--text2); margin-top:4px">Shift+Enter로 줄바꿈하면 한 칸에 여러 줄로 묶여 표시됩니다 (최대 5줄) · Enter는 저장</div>
     </div>
     <div class="form-group">
       <label class="form-label">배경 색상</label>
@@ -1384,6 +1403,19 @@ function dk(year, month, day) {
 function daysInMonth(y, m) { return new Date(y, m, 0).getDate(); }
 function firstDow(y, m) { return new Date(y, m-1, 1).getDay(); }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
+
+// ===== 여러 줄 일정 (Shift+Enter로 줄바꿈, 최대 MAX_EVENT_LINES줄) =====
+const MAX_EVENT_LINES = 5;
+function normalizeLines(text) {
+  return String(text == null ? '' : text)
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .slice(0, MAX_EVENT_LINES)
+    .join('\n');
+}
+function lineCountOf(text) {
+  return Math.max(1, Math.min(MAX_EVENT_LINES, String(text || '').split('\n').length));
+}
 function toast(msg) {
   const el = document.getElementById('toast');
   el.textContent = msg;
@@ -1677,7 +1709,7 @@ function makePendingLabel() {
 
 function makePendingPill(m) {
   const pill = document.createElement('div');
-  pill.className = 'pending-pill';
+  pill.className = 'pending-pill' + (lineCountOf(m.text) > 1 ? ' multiline' : '');
   pill.style.background = m.color;
   pill.style.color = m.textColor || '#000000';
   pill.style.justifyContent = m.align === 'center' ? 'center' : (m.align === 'right' ? 'flex-end' : 'flex-start');
@@ -1696,8 +1728,6 @@ function buildEventBars(wk) {
   const colRows = [0,0,0,0,0,0,0]; // 각 컬럼별 실제 필요한 표시 줄 수
   const colHasEvent = [false,false,false,false,false,false,false];
   if (!hits.length) return { barEls: [], colRows, colHasEvent };
-
-  const MAX_VISIBLE_ROWS = state.maxEventRows || 3;
 
   // 현재 달 칸 범위 (이전/다음 달 칸은 예정 존이므로 바를 그리지 않음)
   let minCur = 7, maxCur = -1;
@@ -1726,47 +1756,55 @@ function buildEventBars(wk) {
   // startDate 기준 정렬 → 같으면 넓은것(endDate 늦은것) 우선
   withCols.sort((a, b) => a.startDate.localeCompare(b.startDate) || b.endDate.localeCompare(a.endDate));
 
-  // Assign rows (greedy, no collision) - 제한 없이 모든 이벤트에 row 배정
+  // 이벤트별 줄 수 = 차지하는 row 수 (여러 줄 일정은 그만큼 세로로 자리 차지)
+  const spans = withCols.map(ev => lineCountOf(ev.text));
+  // 한 줄짜리 여러 개보다 긴 일정이 있으면 그 일정이 들어갈 만큼은 보장
+  const MAX_VISIBLE_ROWS = Math.max(state.maxEventRows || 3, ...spans);
+
+  // Assign rows (greedy, no collision) — span만큼 연속된 빈 row 확보
   const rowEnds = [];
-  const rows = withCols.map(ev => {
-    for (let r = 0; r < rowEnds.length; r++) {
-      if (rowEnds[r] < ev.sc) { rowEnds[r] = ev.ec; return r; }
+  const rows = withCols.map((ev, i) => {
+    const span = spans[i];
+    for (let r = 0; ; r++) {
+      let fits = true;
+      for (let k = r; k < r + span; k++) {
+        if (rowEnds[k] !== undefined && rowEnds[k] >= ev.sc) { fits = false; break; }
+      }
+      if (fits) {
+        for (let k = r; k < r + span; k++) rowEnds[k] = ev.ec;
+        return r;
+      }
     }
-    rowEnds.push(ev.ec);
-    return rowEnds.length - 1;
   });
 
-  // 각 컬럼별 이벤트 수 계산
-  const colEventCount = [0,0,0,0,0,0,0];
-  withCols.forEach(ev => {
+  // 각 컬럼별로 필요한 총 row 수 계산
+  const colRowsNeeded = [0,0,0,0,0,0,0];
+  withCols.forEach((ev, i) => {
     for (let c = ev.sc; c <= ev.ec; c++) {
-      colEventCount[c]++;
+      colRowsNeeded[c] = Math.max(colRowsNeeded[c], rows[i] + spans[i]);
       colHasEvent[c] = true;
     }
   });
 
-  // 컬럼별 overflow 판단: 해당 컬럼의 이벤트 수가 MAX를 넘는지
+  // 컬럼별 overflow 판단: 필요한 row 수가 MAX를 넘는지
   const colOverflow = [0,0,0,0,0,0,0];
-  const colBarLimit = [0,0,0,0,0,0,0]; // 각 컬럼별 실제 바 표시 한도
+  const colBarLimit = [0,0,0,0,0,0,0]; // 각 컬럼별 실제 바 표시 한도(row 단위)
   for (let c = 0; c < 7; c++) {
-    if (colEventCount[c] > MAX_VISIBLE_ROWS) {
+    if (colRowsNeeded[c] > MAX_VISIBLE_ROWS) {
       colBarLimit[c] = MAX_VISIBLE_ROWS - 1; // 마지막줄은 +N용
     } else {
       colBarLimit[c] = MAX_VISIBLE_ROWS;
     }
   }
 
-  // 각 이벤트가 어떤 컬럼에서는 보이고 어떤 컬럼에서는 숨겨질 수 있음
-  // 이벤트별로 표시 여부 결정: 해당 이벤트가 차지하는 모든 컬럼에서 row가 barLimit 이내인지
-  // → 멀티데이 이벤트는 하나의 바로 표시되므로, 가장 많이 차지한 컬럼 기준
-  // → 간단하게: row가 해당 이벤트가 걸친 컬럼들의 최소 barLimit보다 작으면 표시
+  // 이벤트별 표시 여부: 걸친 모든 컬럼에서 (시작 row + 줄 수)가 한도 이내여야 표시
   const barEls = [];
   const evVisible = withCols.map((ev, i) => {
     let minLimit = MAX_VISIBLE_ROWS;
     for (let c = ev.sc; c <= ev.ec; c++) {
       minLimit = Math.min(minLimit, colBarLimit[c]);
     }
-    return rows[i] < minLimit;
+    return rows[i] + spans[i] <= minLimit;
   });
 
   // 숨겨진 이벤트 수 컬럼별 계산
@@ -1781,12 +1819,13 @@ function buildEventBars(wk) {
     if (!evVisible[i]) return;
 
     const bar = document.createElement('div');
-    bar.className = 'event-bar';
+    bar.className = 'event-bar' + (spans[i] > 1 ? ' multiline' : '');
     const leftPct = (ev.sc / 7 * 100);
     const widthPct = ((ev.ec - ev.sc + 1) / 7 * 100);
     bar.style.left = `calc(${leftPct}% + 3px)`;
     bar.style.width = `calc(${widthPct}% - 6px)`;
     bar.style.top = (28 + rows[i] * 24) + 'px';
+    if (spans[i] > 1) bar.style.height = (spans[i] * 24 - 4) + 'px';
     bar.style.background = ev.color;
     bar.style.color      = ev.textColor || '#fff';
     bar.style.justifyContent = ev.align === 'center' ? 'center' : (ev.align === 'right' ? 'flex-end' : 'flex-start');
@@ -1821,13 +1860,13 @@ function buildEventBars(wk) {
   // 각 컬럼별 실제 표시 줄 수 계산 (day-event-space 높이용)
   for (let c = 0; c < 7; c++) {
     if (!colHasEvent[c]) continue;
-    let maxVisibleRow = -1;
+    let usedRows = 0;
     withCols.forEach((ev, i) => {
       if (ev.sc <= c && c <= ev.ec && evVisible[i]) {
-        maxVisibleRow = Math.max(maxVisibleRow, rows[i]);
+        usedRows = Math.max(usedRows, rows[i] + spans[i]);
       }
     });
-    colRows[c] = maxVisibleRow + 1;
+    colRows[c] = usedRows;
     if (colOverflow[c] > 0) colRows[c]++; // +N 줄 추가
   }
 
@@ -1856,6 +1895,7 @@ function openDayModal(key) {
 
   // 일정(배너) 입력 초기화
   document.getElementById('event-text-input').value = '';
+  autoGrowTextarea(document.getElementById('event-text-input'));
   document.getElementById('event-start-input').value = defaultDate;
   document.getElementById('event-end-input').value = defaultDate;
   document.getElementById('event-delete-btn').style.display = 'none';
@@ -1999,6 +2039,7 @@ function renderDayEventsList(dayKey) {
     row.onclick = () => {
       currentEventId = ev.id;
       document.getElementById('event-text-input').value = ev.text;
+      autoGrowTextarea(document.getElementById('event-text-input'));
       document.getElementById('event-start-input').value = ev.startDate;
       document.getElementById('event-end-input').value = ev.endDate;
       document.getElementById('event-delete-btn').style.display = '';
@@ -2130,6 +2171,7 @@ function openEventModal(id) {
   // 편집 모드로 덮어쓰기
   currentEventId = id;
   document.getElementById('event-text-input').value  = ev.text;
+  autoGrowTextarea(document.getElementById('event-text-input'));
   document.getElementById('event-start-input').value = ev.startDate;
   document.getElementById('event-end-input').value   = ev.endDate;
   document.getElementById('event-delete-btn').style.display = '';
@@ -2146,8 +2188,37 @@ function openEventModal(id) {
 
 function closeEventModal() { closeDayModal(); }
 
+// 입력 줄 수에 맞춰 textarea 높이 자동 조절
+function autoGrowTextarea(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 150) + 'px';
+}
+
+// Enter = 저장, Shift+Enter = 줄바꿈 (한글 조합 중에는 무시)
+function isPlainEnter(e) {
+  return e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229;
+}
+function handleEventTextKeydown(e) {
+  if (isPlainEnter(e)) { e.preventDefault(); saveEvent(); }
+}
+function handlePendingTextKeydown(e) {
+  if (isPlainEnter(e)) { e.preventDefault(); savePendingMemo(); }
+}
+
+// 입력값을 줄 단위로 정리 — 빈 줄 제거, 각 줄 trim
+function splitTextLines(raw) {
+  return String(raw == null ? '' : raw)
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
 function saveEvent() {
-  const text = document.getElementById('event-text-input').value.trim();
+  const evLines = splitTextLines(document.getElementById('event-text-input').value);
+  if (evLines.length > MAX_EVENT_LINES) { toast(`최대 ${MAX_EVENT_LINES}줄까지 가능합니다`); return; }
+  const text = evLines.join('\n');
   const startDate = document.getElementById('event-start-input').value;
   const endDate = document.getElementById('event-end-input').value;
   const tc = document.querySelector('input[name="ev-text-color"]:checked').value;
@@ -2356,6 +2427,7 @@ function openPendingModal(memoId, slot) {
   document.getElementById('pending-label-input').value =
     (state.pendingLabel !== undefined && state.pendingLabel !== null) ? state.pendingLabel : '예정 (미확정)';
   document.getElementById('pending-text-input').value = memo ? memo.text : '';
+  autoGrowTextarea(document.getElementById('pending-text-input'));
   document.getElementById('pending-start-input').value = '';
   document.getElementById('pending-end-input').value = '';
   document.getElementById('pending-delete-btn').style.display = memo ? '' : 'none';
@@ -2533,7 +2605,9 @@ function pickPendingCustomHex(v) {
 }
 
 function savePendingMemo() {
-  const text = document.getElementById('pending-text-input').value.trim();
+  const pLines = splitTextLines(document.getElementById('pending-text-input').value);
+  if (pLines.length > MAX_EVENT_LINES) { toast(`최대 ${MAX_EVENT_LINES}줄까지 가능합니다`); return; }
+  const text = pLines.join('\n');
   if (!text) { toast('내용을 입력해주세요'); return; }
   const tc = document.querySelector('input[name="pending-text-color"]:checked').value;
   const textColor = tc === 'white' ? '#ffffff' : '#000000';
