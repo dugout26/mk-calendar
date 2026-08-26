@@ -737,8 +737,7 @@ select.form-input { cursor: pointer; }
     <!-- 일정 (이벤트 배너) 추가 -->
     <div class="form-group">
       <label class="form-label">일정 이름</label>
-      <textarea class="form-input" id="event-text-input" rows="1" placeholder="예: 멸망전 합숙" style="min-height:0; resize:vertical" oninput="autoGrowTextarea(this)" onkeydown="handleEventTextKeydown(event)"></textarea>
-      <div style="font-size:11px; color:var(--text2); margin-top:4px">Shift+Enter로 줄바꿈하면 한 칸에 여러 줄로 묶여 표시됩니다 (최대 5줄) · Enter는 저장</div>
+      <textarea class="form-input" id="event-text-input" rows="1" placeholder="예: 멸망전 합숙" style="min-height:0; line-height:1.45; resize:vertical; overflow:hidden" oninput="autoGrowTextarea(this)" onkeydown="handleEventTextKeydown(event)"></textarea>
     </div>
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px" class="form-group">
       <div>
@@ -840,8 +839,7 @@ select.form-input { cursor: pointer; }
 
     <div class="form-group">
       <label class="form-label">내용</label>
-      <textarea class="form-input" id="pending-text-input" rows="1" placeholder="예: 멸망전 (일정 미정)" style="min-height:0; resize:vertical" oninput="autoGrowTextarea(this)" onkeydown="handlePendingTextKeydown(event)"></textarea>
-      <div style="font-size:11px; color:var(--text2); margin-top:4px">Shift+Enter로 줄바꿈하면 한 칸에 여러 줄로 묶여 표시됩니다 (최대 5줄) · Enter는 저장</div>
+      <textarea class="form-input" id="pending-text-input" rows="1" placeholder="예: 멸망전 (일정 미정)" style="min-height:0; line-height:1.45; resize:vertical; overflow:hidden" oninput="autoGrowTextarea(this)" onkeydown="handlePendingTextKeydown(event)"></textarea>
     </div>
     <div class="form-group">
       <label class="form-label">배경 색상</label>
@@ -1915,6 +1913,8 @@ function openDayModal(key) {
   renderDayEventsList(key);
 
   document.getElementById('day-modal-overlay').classList.add('active');
+  // 높이 계산은 모달이 보이게 된 뒤에 해야 정확함
+  autoGrowTextarea(document.getElementById('event-text-input'));
 }
 
 // 팔레트(기본 또는 커스텀) 기반 색상 그리드 렌더링
@@ -2192,7 +2192,10 @@ function closeEventModal() { closeDayModal(); }
 function autoGrowTextarea(el) {
   if (!el) return;
   el.style.height = 'auto';
-  el.style.height = Math.min(el.scrollHeight, 150) + 'px';
+  // box-sizing:border-box이므로 scrollHeight(패딩 포함)에 테두리 높이를 더해야 안 잘림
+  const cs = getComputedStyle(el);
+  const border = (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
+  el.style.height = Math.min(el.scrollHeight + border, 150) + 'px';
 }
 
 // Enter = 저장, Shift+Enter = 줄바꿈 (한글 조합 중에는 무시)
@@ -2444,6 +2447,7 @@ function openPendingModal(memoId, slot) {
 
   renderPendingList();
   document.getElementById('pending-modal-overlay').classList.add('active');
+  autoGrowTextarea(document.getElementById('pending-text-input'));
 }
 
 function closePendingModal() {
