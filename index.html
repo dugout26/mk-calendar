@@ -301,11 +301,12 @@ body {
   height: 24px;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 800;
   letter-spacing: 1px;
-  color: var(--muted);
+  color: #ffffff;
   flex-shrink: 0;
   user-select: none;
   white-space: nowrap;
@@ -898,6 +899,7 @@ select.form-input { cursor: pointer; }
       <button class="tab" id="stab-btn-background" onclick="switchSettingsTab('background')">배경</button>
       <button class="tab" id="stab-btn-calendar" onclick="switchSettingsTab('calendar')">달력</button>
       <button class="tab" id="stab-btn-colors" onclick="switchSettingsTab('colors')">색상</button>
+      <button class="tab" id="stab-btn-backup" onclick="switchSettingsTab('backup')">백업</button>
     </div>
 
     <!-- Title settings -->
@@ -1107,6 +1109,32 @@ select.form-input { cursor: pointer; }
         <button class="btn btn-secondary" style="flex:1" onclick="paletteReset()">기본 팔레트로 복원</button>
       </div>
       <button class="btn btn-primary" onclick="savePaletteSettings()" style="width:100%">적용</button>
+    </div>
+
+    <!-- 백업 -->
+    <div id="stab-backup" style="display:none">
+      <div class="form-group">
+        <label class="form-label">백업 파일 내보내기</label>
+        <div style="font-size:12px; color:var(--text2); margin-bottom:8px; line-height:1.6">
+          일정 · 날짜별 내용 · 예정 메모 · 이미지 · 설정을 파일 하나로 저장합니다.<br>
+          인터넷 사용기록을 지우거나 다른 PC로 옮길 때 이 파일로 그대로 되살릴 수 있습니다.
+        </div>
+        <button class="btn btn-primary" id="backup-export-btn" style="width:100%" onclick="exportBackup()">백업 파일 내보내기</button>
+        <div style="font-size:11px; color:var(--text2); margin-top:8px" id="backup-info"></div>
+      </div>
+
+      <hr class="divider">
+
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label">백업 파일 불러오기</label>
+        <div style="font-size:12px; color:var(--text2); margin-bottom:8px; line-height:1.6">
+          백업 파일을 선택하면 지금 캘린더 내용이 그 파일 내용으로 <b>완전히 대체</b>됩니다.<br>
+          되돌릴 수 있도록 지금 내용은 따로 보관해둡니다.
+        </div>
+        <button class="btn btn-secondary" style="width:100%" onclick="document.getElementById('backup-file-input').click()">백업 파일 선택</button>
+        <input type="file" id="backup-file-input" accept="application/json,.json" style="display:none" onchange="importBackupFile(event)">
+        <button class="btn btn-secondary" id="backup-undo-btn" style="width:100%; margin-top:8px; display:none" onclick="undoRestore()">직전 복원 되돌리기</button>
+      </div>
     </div>
   </div>
 </div>
@@ -2875,15 +2903,146 @@ function savePaletteSettings() {
   toast(changedEvents ? `색상 팔레트 적용됨 — 일정 ${changedEvents}개 색상 변경` : '색상 팔레트 적용됨');
 }
 
+// ===== 백업 (내보내기 / 불러오기) =====
+const BACKUP_UNDO_KEY = 'my-calendar-v1-before-restore';
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload  = () => resolve(fr.result);
+    fr.onerror = () => reject(fr.error);
+    fr.readAsDataURL(blob);
+  });
+}
+
+function updateBackupInfo() {
+  const el = document.getElementById('backup-info');
+  if (el) {
+    const evCount  = (state.events || []).length;
+    const dayCount = Object.keys(state.dayData || {}).length;
+    let memoCount = 0;
+    Object.values(state.pendingMemos || {}).forEach(a => { if (Array.isArray(a)) memoCount += a.length; });
+    el.textContent = `현재 저장된 내용: 일정 ${evCount}개 · 내용이 있는 날짜 ${dayCount}일 · 예정 메모 ${memoCount}개`;
+  }
+  const undoBtn = document.getElementById('backup-undo-btn');
+  if (undoBtn) undoBtn.style.display = localStorage.getItem(BACKUP_UNDO_KEY) ? '' : 'none';
+}
+
+async function exportBackup() {
+  const btn = document.getElementById('backup-export-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '백업 파일 만드는 중...'; }
+  try {
+    // 이미지(IndexedDB)까지 포함해야 완전한 백업이 됨
+    const images = [];
+    try {
+      const all = await idbGetAll();
+      for (const rec of all) {
+        try { images.push({ id: rec.id, data: await blobToDataUrl(rec.blob) }); }
+        catch(e) { console.error('backup image failed', rec.id, e); }
+      }
+    } catch(e) { console.error('IDB read failed during backup', e); }
+
+    const payload = {
+      app: 'mk-calendar',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      state,
+      images
+    };
+    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const d = new Date();
+    const stamp = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const a = document.createElement('a');
+    a.download = `MK캘린더_백업_${stamp}.json`;
+    a.href = url;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    toast(`백업 완료 (이미지 ${images.length}개 포함)`);
+  } catch(e) {
+    console.error('exportBackup failed', e);
+    toast('백업 파일 만들기 실패');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '백업 파일 내보내기'; }
+  }
+}
+
+async function importBackupFile(e) {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = ''; // 같은 파일 다시 선택 가능하게
+  if (!file) return;
+
+  let payload;
+  try {
+    payload = JSON.parse(await file.text());
+  } catch(err) {
+    toast('백업 파일을 읽을 수 없습니다');
+    return;
+  }
+  if (!payload || payload.app !== 'mk-calendar' || !payload.state || typeof payload.state !== 'object') {
+    toast('MK 캘린더 백업 파일이 아닙니다');
+    return;
+  }
+
+  const evCount  = Array.isArray(payload.state.events) ? payload.state.events.length : 0;
+  const imgCount = Array.isArray(payload.images) ? payload.images.length : 0;
+  const when     = payload.exportedAt ? payload.exportedAt.slice(0, 10) : '알 수 없음';
+  const ok = confirm(
+    `백업을 불러옵니다.\n\n` +
+    `· 백업 날짜: ${when}\n` +
+    `· 일정 ${evCount}개, 이미지 ${imgCount}개\n\n` +
+    `지금 캘린더 내용은 이 백업으로 완전히 대체됩니다.\n` +
+    `(되돌릴 수 있도록 지금 내용은 따로 보관합니다)\n\n계속할까요?`
+  );
+  if (!ok) return;
+
+  try {
+    // 되돌리기용으로 현재 상태 보관
+    try { localStorage.setItem(BACKUP_UNDO_KEY, JSON.stringify(state)); }
+    catch(err) { console.error('undo snapshot failed', err); }
+
+    // 이미지 복원
+    if (Array.isArray(payload.images)) {
+      for (const img of payload.images) {
+        if (!img || !img.id || typeof img.data !== 'string') continue;
+        try {
+          const blob = await (await fetch(img.data)).blob();
+          await idbPut(img.id, blob);
+        } catch(err) { console.error('restore image failed', img.id, err); }
+      }
+    }
+
+    localStorage.setItem('my-calendar-v1', JSON.stringify(payload.state));
+    alert('복원되었습니다. 확인을 누르면 새로고침합니다.');
+    location.reload();
+  } catch(err) {
+    console.error('importBackupFile failed', err);
+    toast('복원 실패 — 저장 공간이 부족할 수 있습니다');
+  }
+}
+
+function undoRestore() {
+  const snap = localStorage.getItem(BACKUP_UNDO_KEY);
+  if (!snap) { toast('되돌릴 내용이 없습니다'); return; }
+  if (!confirm('복원 직전 상태로 되돌립니다.\n지금 보이는 내용은 사라집니다. 계속할까요?')) return;
+  localStorage.setItem('my-calendar-v1', snap);
+  localStorage.removeItem(BACKUP_UNDO_KEY);
+  alert('되돌렸습니다. 확인을 누르면 새로고침합니다.');
+  location.reload();
+}
+
 function switchSettingsTab(tab) {
   document.getElementById('stab-btn-title').classList.toggle('active', tab === 'title');
   document.getElementById('stab-btn-background').classList.toggle('active', tab === 'background');
   document.getElementById('stab-btn-calendar').classList.toggle('active', tab === 'calendar');
   document.getElementById('stab-btn-colors').classList.toggle('active', tab === 'colors');
+  document.getElementById('stab-btn-backup').classList.toggle('active', tab === 'backup');
   document.getElementById('stab-title').style.display = tab === 'title' ? 'block' : 'none';
   document.getElementById('stab-background').style.display = tab === 'background' ? 'block' : 'none';
   document.getElementById('stab-calendar').style.display = tab === 'calendar' ? 'block' : 'none';
   document.getElementById('stab-colors').style.display = tab === 'colors' ? 'block' : 'none';
+  document.getElementById('stab-backup').style.display = tab === 'backup' ? 'block' : 'none';
+  if (tab === 'backup') updateBackupInfo();
 }
 
 function selectBgType(type) {
