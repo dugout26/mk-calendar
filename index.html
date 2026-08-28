@@ -1116,9 +1116,14 @@ select.form-input { cursor: pointer; }
       <div class="form-group">
         <label class="form-label">백업 파일 내보내기</label>
         <div style="font-size:12px; color:var(--text2); margin-bottom:8px; line-height:1.6">
-          일정 · 날짜별 내용 · 예정 메모 · 이미지 · 설정을 파일 하나로 저장합니다.<br>
+          일정 · 날짜별 내용 · 예정 메모 · 이미지를 파일 하나로 저장합니다.<br>
           인터넷 사용기록을 지우거나 다른 PC로 옮길 때 이 파일로 그대로 되살릴 수 있습니다.
         </div>
+        <div class="radio-group" style="margin-bottom:8px">
+          <label><input type="radio" name="backup-scope" value="all" checked onchange="onBackupScopeChange()"> 전체</label>
+          <label><input type="radio" name="backup-scope" value="month" onchange="onBackupScopeChange()"> 특정 월만</label>
+        </div>
+        <input type="month" class="form-input" id="backup-month" style="display:none; margin-bottom:8px" onchange="updateBackupInfo()">
         <button class="btn btn-primary" id="backup-export-btn" style="width:100%" onclick="exportBackup()">백업 파일 내보내기</button>
         <div style="font-size:11px; color:var(--text2); margin-top:8px" id="backup-info"></div>
       </div>
@@ -1128,8 +1133,9 @@ select.form-input { cursor: pointer; }
       <div class="form-group" style="margin-bottom:0">
         <label class="form-label">백업 파일 불러오기</label>
         <div style="font-size:12px; color:var(--text2); margin-bottom:8px; line-height:1.6">
-          백업 파일을 선택하면 지금 캘린더 내용이 그 파일 내용으로 <b>완전히 대체</b>됩니다.<br>
-          되돌릴 수 있도록 지금 내용은 따로 보관해둡니다.
+          <b>전체 백업</b>은 캘린더 전체를 그 파일 내용으로 대체합니다.<br>
+          <b>월별 백업</b>은 그 달만 되돌리고 다른 달은 그대로 둡니다.<br>
+          어느 쪽이든 되돌릴 수 있도록 지금 내용은 따로 보관해둡니다.
         </div>
         <button class="btn btn-secondary" style="width:100%" onclick="document.getElementById('backup-file-input').click()">백업 파일 선택</button>
         <input type="file" id="backup-file-input" accept="application/json,.json" style="display:none" onchange="importBackupFile(event)">
@@ -2915,14 +2921,66 @@ function blobToDataUrl(blob) {
   });
 }
 
+// "YYYY-MM" → 그 달의 첫날/마지막날 키
+function monthRange(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  return { first: dk(y, m, 1), last: dk(y, m, daysInMonth(y, m)) };
+}
+// 그 달에 걸치는 일정 (멀티데이 포함)
+function eventsInMonth(ym) {
+  const { first, last } = monthRange(ym);
+  return (state.events || []).filter(ev => ev.startDate <= last && ev.endDate >= first);
+}
+function dayDataInMonth(ym) {
+  const out = {};
+  Object.keys(state.dayData || {}).forEach(k => { if (k.startsWith(ym + '-')) out[k] = state.dayData[k]; });
+  return out;
+}
+// dayData 안에서 참조 중인 이미지 id 모음
+function imageIdsFromDayData(dd) {
+  const ids = new Set();
+  Object.values(dd || {}).forEach(day => {
+    (day.items || []).forEach(it => {
+      if (it && it.type === 'image' && isIdbRef(it.src)) ids.add(refToId(it.src));
+    });
+  });
+  return ids;
+}
+
+function currentBackupScope() {
+  const el = document.querySelector('input[name="backup-scope"]:checked');
+  return el ? el.value : 'all';
+}
+function selectedBackupMonth() {
+  const el = document.getElementById('backup-month');
+  return (el && el.value) ? el.value : monthKey(state.year, state.month);
+}
+function onBackupScopeChange() {
+  const monthInput = document.getElementById('backup-month');
+  const isMonth = currentBackupScope() === 'month';
+  if (monthInput) {
+    monthInput.style.display = isMonth ? '' : 'none';
+    if (isMonth && !monthInput.value) monthInput.value = monthKey(state.year, state.month);
+  }
+  updateBackupInfo();
+}
+
 function updateBackupInfo() {
   const el = document.getElementById('backup-info');
   if (el) {
-    const evCount  = (state.events || []).length;
-    const dayCount = Object.keys(state.dayData || {}).length;
-    let memoCount = 0;
-    Object.values(state.pendingMemos || {}).forEach(a => { if (Array.isArray(a)) memoCount += a.length; });
-    el.textContent = `현재 저장된 내용: 일정 ${evCount}개 · 내용이 있는 날짜 ${dayCount}일 · 예정 메모 ${memoCount}개`;
+    if (currentBackupScope() === 'month') {
+      const ym = selectedBackupMonth();
+      const evCount   = eventsInMonth(ym).length;
+      const dd        = dayDataInMonth(ym);
+      const memoCount = ((state.pendingMemos || {})[ym] || []).length;
+      el.textContent = `${ym} : 일정 ${evCount}개 · 내용이 있는 날짜 ${Object.keys(dd).length}일 · 예정 메모 ${memoCount}개`;
+    } else {
+      const evCount  = (state.events || []).length;
+      const dayCount = Object.keys(state.dayData || {}).length;
+      let memoCount = 0;
+      Object.values(state.pendingMemos || {}).forEach(a => { if (Array.isArray(a)) memoCount += a.length; });
+      el.textContent = `전체 : 일정 ${evCount}개 · 내용이 있는 날짜 ${dayCount}일 · 예정 메모 ${memoCount}개`;
+    }
   }
   const undoBtn = document.getElementById('backup-undo-btn');
   if (undoBtn) undoBtn.style.display = localStorage.getItem(BACKUP_UNDO_KEY) ? '' : 'none';
@@ -2932,33 +2990,55 @@ async function exportBackup() {
   const btn = document.getElementById('backup-export-btn');
   if (btn) { btn.disabled = true; btn.textContent = '백업 파일 만드는 중...'; }
   try {
-    // 이미지(IndexedDB)까지 포함해야 완전한 백업이 됨
+    const scope = currentBackupScope();
+    const ym    = selectedBackupMonth();
+
+    // 백업에 담을 이미지 범위 결정 (월별이면 그 달에서 쓰는 이미지만)
+    let wantedIds = null;
+    if (scope === 'month') wantedIds = imageIdsFromDayData(dayDataInMonth(ym));
+
     const images = [];
     try {
-      const all = await idbGetAll();
-      for (const rec of all) {
+      for (const rec of await idbGetAll()) {
+        if (wantedIds && !wantedIds.has(rec.id)) continue;
         try { images.push({ id: rec.id, data: await blobToDataUrl(rec.blob) }); }
         catch(e) { console.error('backup image failed', rec.id, e); }
       }
     } catch(e) { console.error('IDB read failed during backup', e); }
 
-    const payload = {
-      app: 'mk-calendar',
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      state,
-      images
-    };
+    let payload, filename;
+    if (scope === 'month') {
+      payload = {
+        app: 'mk-calendar', version: 1, scope: 'month', month: ym,
+        exportedAt: new Date().toISOString(),
+        data: {
+          events: eventsInMonth(ym),
+          dayData: dayDataInMonth(ym),
+          pendingMemos: (state.pendingMemos || {})[ym] || [],
+          pendingLabelHidden: (state.pendingLabelHidden || {})[ym] || []
+        },
+        images
+      };
+      filename = `MK캘린더_백업_${ym}.json`;
+    } else {
+      const d = new Date();
+      const stamp = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      payload = {
+        app: 'mk-calendar', version: 1, scope: 'all',
+        exportedAt: new Date().toISOString(),
+        state, images
+      };
+      filename = `MK캘린더_전체백업_${stamp}.json`;
+    }
+
     const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
     const url  = URL.createObjectURL(blob);
-    const d = new Date();
-    const stamp = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     const a = document.createElement('a');
-    a.download = `MK캘린더_백업_${stamp}.json`;
+    a.download = filename;
     a.href = url;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 2000);
-    toast(`백업 완료 (이미지 ${images.length}개 포함)`);
+    toast(scope === 'month' ? `${ym} 백업 완료 (이미지 ${images.length}개)` : `전체 백업 완료 (이미지 ${images.length}개)`);
   } catch(e) {
     console.error('exportBackup failed', e);
     toast('백업 파일 만들기 실패');
@@ -2979,22 +3059,40 @@ async function importBackupFile(e) {
     toast('백업 파일을 읽을 수 없습니다');
     return;
   }
-  if (!payload || payload.app !== 'mk-calendar' || !payload.state || typeof payload.state !== 'object') {
+  if (!payload || payload.app !== 'mk-calendar') {
     toast('MK 캘린더 백업 파일이 아닙니다');
     return;
   }
+  // scope 없는 예전 백업 파일은 전체 백업으로 취급
+  const scope = payload.scope === 'month' ? 'month' : 'all';
+  if (scope === 'all' && (!payload.state || typeof payload.state !== 'object')) {
+    toast('백업 파일 형식이 올바르지 않습니다');
+    return;
+  }
+  if (scope === 'month' && (!payload.month || !payload.data || typeof payload.data !== 'object')) {
+    toast('백업 파일 형식이 올바르지 않습니다');
+    return;
+  }
 
-  const evCount  = Array.isArray(payload.state.events) ? payload.state.events.length : 0;
   const imgCount = Array.isArray(payload.images) ? payload.images.length : 0;
   const when     = payload.exportedAt ? payload.exportedAt.slice(0, 10) : '알 수 없음';
-  const ok = confirm(
-    `백업을 불러옵니다.\n\n` +
-    `· 백업 날짜: ${when}\n` +
-    `· 일정 ${evCount}개, 이미지 ${imgCount}개\n\n` +
-    `지금 캘린더 내용은 이 백업으로 완전히 대체됩니다.\n` +
-    `(되돌릴 수 있도록 지금 내용은 따로 보관합니다)\n\n계속할까요?`
-  );
-  if (!ok) return;
+  let msg;
+  if (scope === 'month') {
+    const evCount = Array.isArray(payload.data.events) ? payload.data.events.length : 0;
+    msg = `${payload.month} 월별 백업을 불러옵니다.\n\n` +
+          `· 백업 날짜: ${when}\n` +
+          `· 일정 ${evCount}개, 이미지 ${imgCount}개\n\n` +
+          `${payload.month}의 내용만 이 백업으로 바뀌고, 다른 달은 그대로 유지됩니다.\n` +
+          `(되돌릴 수 있도록 지금 내용은 따로 보관합니다)\n\n계속할까요?`;
+  } else {
+    const evCount = Array.isArray(payload.state.events) ? payload.state.events.length : 0;
+    msg = `전체 백업을 불러옵니다.\n\n` +
+          `· 백업 날짜: ${when}\n` +
+          `· 일정 ${evCount}개, 이미지 ${imgCount}개\n\n` +
+          `지금 캘린더 내용은 이 백업으로 완전히 대체됩니다.\n` +
+          `(되돌릴 수 있도록 지금 내용은 따로 보관합니다)\n\n계속할까요?`;
+  }
+  if (!confirm(msg)) return;
 
   try {
     // 되돌리기용으로 현재 상태 보관
@@ -3012,7 +3110,31 @@ async function importBackupFile(e) {
       }
     }
 
-    localStorage.setItem('my-calendar-v1', JSON.stringify(payload.state));
+    let nextState;
+    if (scope === 'month') {
+      // 그 달만 교체하고 나머지 달은 유지
+      const ym = payload.month;
+      const { first, last } = monthRange(ym);
+      const d = payload.data;
+
+      nextState = JSON.parse(JSON.stringify(state));
+      nextState.events = (nextState.events || []).filter(ev => !(ev.startDate <= last && ev.endDate >= first));
+      if (Array.isArray(d.events)) nextState.events.push(...d.events);
+
+      nextState.dayData = nextState.dayData || {};
+      Object.keys(nextState.dayData).forEach(k => { if (k.startsWith(ym + '-')) delete nextState.dayData[k]; });
+      Object.assign(nextState.dayData, d.dayData || {});
+
+      nextState.pendingMemos = nextState.pendingMemos || {};
+      nextState.pendingMemos[ym] = Array.isArray(d.pendingMemos) ? d.pendingMemos : [];
+
+      nextState.pendingLabelHidden = nextState.pendingLabelHidden || {};
+      nextState.pendingLabelHidden[ym] = Array.isArray(d.pendingLabelHidden) ? d.pendingLabelHidden : [];
+    } else {
+      nextState = payload.state;
+    }
+
+    localStorage.setItem('my-calendar-v1', JSON.stringify(nextState));
     alert('복원되었습니다. 확인을 누르면 새로고침합니다.');
     location.reload();
   } catch(err) {
@@ -3042,7 +3164,11 @@ function switchSettingsTab(tab) {
   document.getElementById('stab-calendar').style.display = tab === 'calendar' ? 'block' : 'none';
   document.getElementById('stab-colors').style.display = tab === 'colors' ? 'block' : 'none';
   document.getElementById('stab-backup').style.display = tab === 'backup' ? 'block' : 'none';
-  if (tab === 'backup') updateBackupInfo();
+  if (tab === 'backup') {
+    const mi = document.getElementById('backup-month');
+    if (mi && !mi.value) mi.value = monthKey(state.year, state.month);  // 보고 있던 달을 기본값으로
+    onBackupScopeChange();
+  }
 }
 
 function selectBgType(type) {
