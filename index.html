@@ -117,7 +117,7 @@ body {
 
 #calendar-body {
   display: grid;
-  height: var(--cal-height, 750px);
+  height: max(var(--cal-height, 750px), var(--events-min-height, 0px));
 }
 
 .day-headers {
@@ -179,9 +179,9 @@ body {
 .event-bar.multiline {
   white-space: pre-line;
   text-overflow: clip;
-  line-height: 1.25;
-  padding-top: 3px;
-  padding-bottom: 3px;
+  line-height: min(1.25em, 20px);
+  padding-top: 2px;
+  padding-bottom: 2px;
 }
 
 /* Unified day cell (날짜번호 + 이벤트공간 + 콘텐츠 통합) */
@@ -1072,7 +1072,7 @@ select.form-input { cursor: pointer; }
       </div>
       <div class="form-group">
         <label class="form-label">이벤트 바 최대 줄 수</label>
-        <input type="range" id="s-max-event-rows" min="1" max="8" step="1" value="3" oninput="previewMaxEventRows(this.value)">
+        <input type="range" id="s-max-event-rows" min="1" max="20" step="1" value="3" oninput="previewMaxEventRows(this.value)">
         <div style="text-align:right; font-size:12px; color:#aaa; margin-top:4px">최대 <span id="max-event-rows-label">3</span>줄</div>
       </div>
       <div class="form-group">
@@ -1437,7 +1437,7 @@ function firstDow(y, m) { return new Date(y, m-1, 1).getDay(); }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
 
 // ===== 여러 줄 일정 (Shift+Enter로 줄바꿈, 최대 MAX_EVENT_LINES줄) =====
-const MAX_EVENT_LINES = 5;
+const MAX_EVENT_LINES = 20;
 function normalizeLines(text) {
   return String(text == null ? '' : text)
     .replace(/\r\n?/g, '\n')
@@ -1570,7 +1570,7 @@ function renderBody() {
   const today = dk(new Date().getFullYear(), new Date().getMonth()+1, new Date().getDate());
 
   const numWeeks = cells.length / 7;
-  body.style.gridTemplateRows = `repeat(${numWeeks}, minmax(0, 1fr))`;
+  const weekMinHeights = [];
 
   // 예정(미확정) 메모 칸: 이전/다음 달 빈 칸을 칸별로 유지, 클릭한 칸에 메모 배치
   const memos = getMonthMemos(year, month);
@@ -1588,6 +1588,8 @@ function renderBody() {
 
     // Calculate event bars for this week
     const { barEls, colRows, colHasEvent } = buildEventBars(wk);
+    // 절대 배치된 이벤트 바가 다음 주를 덮지 않도록 실제 표시 높이를 확보.
+    weekMinHeights.push(40 + Math.max(...colRows) * 24);
 
     // CSS grid: 7 columns, single row (1fr)
     // Each day-cell spans all rows. Event bars overlay on top.
@@ -1686,9 +1688,13 @@ function renderBody() {
     body.appendChild(weekDiv);
   }
 
+  body.style.gridTemplateRows = weekMinHeights.map(h => `minmax(${h}px, 1fr)`).join(' ');
+  const minBodyHeight = weekMinHeights.reduce((sum, h) => sum + h, 0);
+  body.style.setProperty('--events-min-height', minBodyHeight + 'px');
+
   // 빈 칸이 하나도 없는 달: 달력 하단에 예정 스트립 표시
   if (!hasEmptyCells) {
-    body.style.gridTemplateRows = `repeat(${numWeeks}, minmax(0, 1fr)) auto`;
+    body.style.gridTemplateRows += ' auto';
     const strip = document.createElement('div');
     strip.className = 'pending-strip';
     const stripLabel = makePendingLabel();
@@ -1696,6 +1702,7 @@ function renderBody() {
     memos.forEach(m => strip.appendChild(makePendingPill(m)));
     strip.onclick = () => openPendingModal(null, null);
     body.appendChild(strip);
+    body.style.setProperty('--events-min-height', (minBodyHeight + strip.getBoundingClientRect().height) + 'px');
   }
 }
 
@@ -1899,7 +1906,7 @@ function buildEventBars(wk) {
       }
     });
     colRows[c] = usedRows;
-    if (colOverflow[c] > 0) colRows[c]++; // +N 줄 추가
+    if (colOverflow[c] > 0) colRows[c] = Math.max(colRows[c], colBarLimit[c] + 1);
   }
 
   return { barEls, colRows, colHasEvent };
@@ -2230,6 +2237,7 @@ function autoGrowTextarea(el) {
   const cs = getComputedStyle(el);
   const border = (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
   el.style.height = Math.min(el.scrollHeight + border, 150) + 'px';
+  el.style.overflowY = el.scrollHeight + border > 150 ? 'auto' : 'hidden';
 }
 
 // Enter = 저장, Shift+Enter = 줄바꿈 (한글 조합 중에는 무시)
