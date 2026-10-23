@@ -179,7 +179,7 @@ body {
 .event-bar.multiline {
   white-space: pre-line;
   text-overflow: clip;
-  line-height: min(1.25em, 20px);
+  line-height: 1.25;
   padding-top: 2px;
   padding-bottom: 2px;
 }
@@ -1587,9 +1587,9 @@ function renderBody() {
     weekDiv.className = 'week-row';
 
     // Calculate event bars for this week
-    const { barEls, colRows, colHasEvent } = buildEventBars(wk);
+    const { barEls, colHeights } = buildEventBars(wk);
     // 절대 배치된 이벤트 바가 다음 주를 덮지 않도록 실제 표시 높이를 확보.
-    weekMinHeights.push(40 + Math.max(...colRows) * 24);
+    weekMinHeights.push(40 + Math.max(...colHeights));
 
     // CSS grid: 7 columns, single row (1fr)
     // Each day-cell spans all rows. Event bars overlay on top.
@@ -1633,11 +1633,11 @@ function renderBody() {
       dayCell.appendChild(dn);
 
       // 이벤트 배너 공간 (이미지 있는 셀은 항상 IMAGE_EVENT_ROWS_RESERVE줄 확보 → 이미지 Y 통일)
-      const spaceRows = hasImage ? Math.max(colRows[idx], IMAGE_EVENT_ROWS_RESERVE) : colRows[idx];
-      if (spaceRows > 0) {
+      const spaceHeight = hasImage ? Math.max(colHeights[idx], IMAGE_EVENT_ROWS_RESERVE * 24) : colHeights[idx];
+      if (spaceHeight > 0) {
         const evSpace = document.createElement('div');
         evSpace.className = 'day-event-space';
-        evSpace.style.minHeight = (spaceRows * 24) + 'px';
+        evSpace.style.minHeight = spaceHeight + 'px';
         dayCell.appendChild(evSpace);
       }
 
@@ -1764,9 +1764,10 @@ function buildEventBars(wk) {
   const wEnd   = dk(wk[6].y, wk[6].m, wk[6].d);
 
   const hits = state.events.filter(ev => ev.startDate <= wEnd && ev.endDate >= wStart);
+  const colHeights = [0,0,0,0,0,0,0]; // 실제 표시 높이(px)
   const colRows = [0,0,0,0,0,0,0]; // 각 컬럼별 실제 필요한 표시 줄 수
   const colHasEvent = [false,false,false,false,false,false,false];
-  if (!hits.length) return { barEls: [], colRows, colHasEvent };
+  if (!hits.length) return { barEls: [], colRows, colHasEvent, colHeights };
 
   // 현재 달 칸 범위 (이전/다음 달 칸은 예정 존이므로 바를 그리지 않음)
   let minCur = 7, maxCur = -1;
@@ -1790,7 +1791,7 @@ function buildEventBars(wk) {
     if (sc > ec) return null;
     return { ...ev, sc, ec };
   }).filter(Boolean);
-  if (!withCols.length) return { barEls: [], colRows, colHasEvent };
+  if (!withCols.length) return { barEls: [], colRows, colHasEvent, colHeights };
 
   // startDate 기준 정렬 → 같으면 넓은것(endDate 늦은것) 우선
   withCols.sort((a, b) => a.startDate.localeCompare(b.startDate) || b.endDate.localeCompare(a.endDate));
@@ -1853,6 +1854,19 @@ function buildEventBars(wk) {
     }
   });
 
+  // 표시 줄 제한은 유지하되 실제 배치는 글자 높이 + 안쪽 여백 + 바 간격으로 계산.
+  const fontSize = parseFloat(getComputedStyle(document.getElementById('calendar-container')).getPropertyValue('--fs-event')) || 16;
+  const lineHeight = fontSize * 1.25;
+  const barTops = [];
+  const barHeights = spans.map(span => span > 1 ? span * lineHeight + 4 : 20);
+  withCols.map((ev, i) => i).sort((a, b) => rows[a] - rows[b]).forEach(i => {
+    if (!evVisible[i]) return;
+    const ev = withCols[i];
+    const top = Math.max(...colHeights.slice(ev.sc, ev.ec + 1));
+    barTops[i] = top;
+    for (let c = ev.sc; c <= ev.ec; c++) colHeights[c] = top + barHeights[i] + 4;
+  });
+
   // 바 생성
   withCols.forEach((ev, i) => {
     if (!evVisible[i]) return;
@@ -1863,8 +1877,8 @@ function buildEventBars(wk) {
     const widthPct = ((ev.ec - ev.sc + 1) / 7 * 100);
     bar.style.left = `calc(${leftPct}% + 3px)`;
     bar.style.width = `calc(${widthPct}% - 6px)`;
-    bar.style.top = (28 + rows[i] * 24) + 'px';
-    if (spans[i] > 1) bar.style.height = (spans[i] * 24 - 4) + 'px';
+    bar.style.top = (28 + barTops[i]) + 'px';
+    if (spans[i] > 1) bar.style.height = barHeights[i] + 'px';
     bar.style.background = ev.color;
     bar.style.color      = ev.textColor || '#fff';
     bar.style.justifyContent = ev.align === 'center' ? 'center' : (ev.align === 'right' ? 'flex-end' : 'flex-start');
@@ -1878,14 +1892,13 @@ function buildEventBars(wk) {
   // 넘치는 컬럼에 "+N" 표시
   colOverflow.forEach((cnt, col) => {
     if (cnt <= 0) return;
-    const moreRow = colBarLimit[col]; // +N이 표시될 row
     const more = document.createElement('div');
     more.className = 'event-bar event-bar-more';
     const leftPct = (col / 7 * 100);
     const widthPct = (1 / 7 * 100);
     more.style.left = `calc(${leftPct}% + 3px)`;
     more.style.width = `calc(${widthPct}% - 6px)`;
-    more.style.top = (28 + moreRow * 24) + 'px';
+    more.style.top = (28 + colHeights[col]) + 'px';
     more.textContent = `+${cnt}`;
     more.style.background = 'rgba(255,255,255,0.1)';
     more.style.color = 'var(--text2)';
@@ -1894,6 +1907,7 @@ function buildEventBars(wk) {
     const dayKey = dk(wk[col].y, wk[col].m, wk[col].d);
     more.onclick = e => { e.stopPropagation(); openDayModal(dayKey); };
     barEls.push(more);
+    colHeights[col] += 24;
   });
 
   // 각 컬럼별 실제 표시 줄 수 계산 (day-event-space 높이용)
@@ -1909,7 +1923,7 @@ function buildEventBars(wk) {
     if (colOverflow[c] > 0) colRows[c] = Math.max(colRows[c], colBarLimit[c] + 1);
   }
 
-  return { barEls, colRows, colHasEvent };
+  return { barEls, colRows, colHasEvent, colHeights };
 }
 
 // ===== DAY MODAL =====
@@ -2794,6 +2808,7 @@ function previewMaxEventRows(val) {
 function previewFontSize(val) {
   document.getElementById('font-size-label').textContent = val;
   document.getElementById('calendar-container').style.setProperty('--fs-event', val + 'px');
+  renderBody();
 }
 function previewBorderWidth(val) {
   document.getElementById('border-width-label').textContent = val;
